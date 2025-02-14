@@ -76,7 +76,7 @@ func main() {
 		thisResult := results.Result{}
 		thisResult.Config = *testConfig
 		switch testConfig.TestKind {
-		case "iperf":
+		case config.TestKindIperf:
 			var iperfResults []*iperf.Results
 			err = iperf.CreateTestPolicy(ctx, clients, testPolicyName, testConfig.TestNamespace)
 			if err != nil {
@@ -101,7 +101,7 @@ func main() {
 					log.WithError(err).Error("failed to summarize iperf results")
 				}
 			}
-		case "qperf":
+		case config.TestKindQperf:
 			var qperfResults []*qperf.Results
 			err = qperf.CreateTestPolicy(ctx, clients, testPolicyName, testConfig.TestNamespace)
 			if err != nil {
@@ -127,7 +127,7 @@ func main() {
 					log.WithError(err).Error("failed to summarize iperf results")
 				}
 			}
-		case "dnsperf":
+		case config.TestKindDNSPerf:
 			_, err = policy.GetOrCreateDNSPolicy(ctx, clients, dnsperf.MakeDNSPolicy(testConfig.TestNamespace, testPolicyName, testConfig.DNSPerfNumDomains))
 			if err != nil {
 				log.WithError(err).Fatal("failed to create dnsperf policy")

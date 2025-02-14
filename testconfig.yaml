@@ -1,4 +1,4 @@
-- testKind: qperf
+- testKind: thruput-latency
   numPolicies: 5
   numServices: 10
   numPods: 7
@@ -7,7 +7,7 @@
   encap: vxlan
   dataplane: iptables
   iterations: 3
-- testKind: iperf
+- testKind: thruput-latency
   numPolicies: 20
   numServices: 3
   numPods: 9

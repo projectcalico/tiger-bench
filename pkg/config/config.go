@@ -79,7 +79,7 @@ type TestKind string
 const (
 	TestKindDNSPerf TestKind = "dnsperf"
 	TestKindIperf   TestKind = "iperf"
-	TestKindQperf   TestKind = "qperf"
+	TestKindQperf   TestKind = "thruput-latency"
 )
 
 // Encap represents the encapsulation type to use.
@@ -117,7 +117,7 @@ const (
 
 // TestConfig represents a test to run on a cluster, and the configuration for the test.
 type TestConfig struct {
-	TestKind            TestKind  `validate:"required,oneof=dnsperf iperf qperf"`
+	TestKind            TestKind  `validate:"required,oneof=dnsperf iperf thruput-latency"`
 	Encap               Encap     `validate:"omitempty,oneof=none vxlan ipip"`
 	Dataplane           DataPlane `validate:"omitempty,oneof=iptables bpf"`
 	NumPolicies         int       `validate:"gte=0"`

@@ -31,6 +31,6 @@ type Result struct {
 	// CalicoNodeMemory stats.MinMaxAvg      `json:"CalicoNodeMemory,omitempty"`
 	TTFR    map[string]string    `json:"ttfr,omitempty"`
 	IPerf   *iperf.ResultSummary `json:"iperf,omitempty"`
-	QPerf   *qperf.ResultSummary `json:"qperf,omitempty"`
+	QPerf   *qperf.ResultSummary `json:"thruput-latency,omitempty"`
 	DNSPerf *dnsperf.Results     `json:"dnsperf,omitempty"`
 }
