@@ -12,9 +12,9 @@ It also provides a framework for us to extend later with other tests.
    `docker pull <image>`, `docker tag <private-image-name>`, `docker push <private-image-name>`
 
    The images are:
-   `quay.io/tigeradev/tiger-bench-nginx:latest`
-   `quay.io/tigeradev/tiger-bench-perf:latest`
-   `quay.io/tigeradev/tiger-bench:latest` - this is the tool itself.
+   `quay.io/tigeradev/tiger-bench-nginx:v0.1.0`
+   `quay.io/tigeradev/tiger-bench-perf:v0.1.0`
+   `quay.io/tigeradev/tiger-bench:v0.1.0` - this is the tool itself.
 
 1. Create a `testconfig.yaml` file, containing a list of test definitions you'd like to run (see example provided)
 1. Run the tool, substituting the image names in the command below if needed, and modifying the test parameters if desired:
@@ -23,9 +23,9 @@ It also provides a framework for us to extend later with other tests.
    -v "${PWD}":/results \
    -v ${KUBECONFIG}:/kubeconfig \
    -v ${PWD}/testconfig.yaml:/testconfig.yaml \
-   -e WEBSERVER_IMAGE="quay.io/tigeradev/tiger-bench-nginx:latest" \
-   -e PERF_IMAGE="quay.io/tigeradev/tiger-bench-perf:latest" \
-   quay.io/tigeradev/tiger-bench:latest
+   -e WEBSERVER_IMAGE="quay.io/tigeradev/tiger-bench-nginx:v0.1.0" \
+   -e PERF_IMAGE="quay.io/tigeradev/tiger-bench-perf:v0.1.0" \
+   quay.io/tigeradev/tiger-bench:v0.1.0
    ```
 1. See results in the `results.json` file in your local directory!
 
@@ -55,9 +55,9 @@ docker run --rm --net=host \
 -v "${PWD}":/results \
 -v ${KUBECONFIG}:/kubeconfig \
 -v ${PWD}/testconfig.yaml:/testconfig.yaml \
--e WEBSERVER_IMAGE="quay.io/tigeradev/tiger-bench-nginx:latest" \
--e PERF_IMAGE="quay.io/tigeradev/tiger-bench-perf:latest" \
-quay.io/tigeradev/tiger-bench:latest
+-e WEBSERVER_IMAGE="quay.io/tigeradev/tiger-bench-nginx:v0.1.0" \
+-e PERF_IMAGE="quay.io/tigeradev/tiger-bench-perf:v0.1.0" \
+quay.io/tigeradev/tiger-bench:v0.1.0
 ```
 
 The tool runs in the hosts network namespace to ensure it has the same access as a user running kubectl on the host.
