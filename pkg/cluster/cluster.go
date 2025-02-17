@@ -62,7 +62,7 @@ func ConfigureCluster(ctx context.Context, cfg config.Config, clients config.Cli
 	}
 
 	if testConfig.TestKind == config.TestKindDNSPerf {
-		if testConfig.DNSPerfMode != config.DNSPerfModeUnset {
+		if testConfig.DNSPerf.Mode != config.DNSPerfModeUnset {
 			err = patchFelixConfig(ctx, clients, testConfig)
 			if err != nil {
 				return fmt.Errorf("failed to patch felixconfig")
@@ -91,7 +91,7 @@ func patchFelixConfig(ctx context.Context, clients config.Clients, testConfig co
 		return fmt.Errorf("failed to get felixconfig")
 	}
 	log.Debug("felixconfig is", felixconfig)
-	dnsPolicyMode := testConfig.DNSPerfMode
+	dnsPolicyMode := testConfig.DNSPerf.Mode
 	// patching felixconfig to use DNS policy mode
 	log.Infof("Patching felixconfig to use %s dnspolicymode", dnsPolicyMode)
 	v3PolicyMode := v3.DNSPolicyModeNoDelay

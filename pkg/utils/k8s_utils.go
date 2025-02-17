@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"time"
 
@@ -187,6 +188,32 @@ func GetOrCreateSvc(ctx context.Context, clients config.Clients, svc corev1.Serv
 	return svc, nil
 }
 
+// DeleteServices deletes services starting with a prefix
+func DeleteServices(ctx context.Context, clients config.Clients, namespace string, serviceNamePrefix string) error {
+	log.Debug("Entering DeleteServices function")
+	svcs := corev1.ServiceList{}
+	err := clients.CtrlClient.List(ctx, &svcs, ctrlclient.InNamespace(namespace))
+	if err != nil {
+		log.WithError(err).Error("failed to list services")
+		return err
+	}
+	for _, svc := range svcs.Items {
+		if strings.HasPrefix(svc.Name, serviceNamePrefix) {
+			log.Debug("Deleting service: ", svc.Name)
+			err = clients.CtrlClient.Delete(ctx, &svc)
+			if err != nil {
+				if ctrlclient.IgnoreNotFound(err) == nil {
+					log.Infof("didn't find existing service %s", svc.Name)
+				} else {
+					log.WithError(err).Errorf("failed to delete svc %v", svc.Name)
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // GetOrCreateDeployment gets or creates a deployment if it does not exist
 func GetOrCreateDeployment(ctx context.Context, clients config.Clients, deployment appsv1.Deployment) (appsv1.Deployment, error) {
 	log.Debug("Entering GetOrCreateDeployment function")
@@ -208,6 +235,20 @@ func GetOrCreateDeployment(ctx context.Context, clients config.Clients, deployme
 		log.Infof("found existing deployment %s", deployment.Name)
 	}
 	return deployment, nil
+}
+
+// DeleteDeployment deletes a deployment, ignoring if it didn't exist
+func DeleteDeployment(ctx context.Context, clients config.Clients, namespace string, deploymentName string) error {
+	log.Debug("Entering DeleteDeployment function")
+	err := clients.CtrlClient.Delete(ctx, &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: deploymentName, Namespace: namespace}})
+	if err != nil {
+		if ctrlclient.IgnoreNotFound(err) == nil {
+			log.Infof("didn't find existing deployment %s", deploymentName)
+			return nil
+		}
+		log.WithError(err).Error("failed to delete deployment")
+	}
+	return err
 }
 
 // GetOrCreateDS gets or creates a deployment if it does not exist
@@ -331,6 +372,8 @@ func RetryinPod(ctx context.Context, clients config.Clients, pod *corev1.Pod, cm
 			break
 		} else {
 			log.Infof("Hit error running command, retrying: %s", err)
+			log.Info("stdout: ", stdout)
+			log.Info("stderr: ", stderr)
 		}
 		time.Sleep(1 * time.Second)
 	}
