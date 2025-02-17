@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: testns1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-external-qperf
+  namespace: testns1
+spec:
+  type: NodePort
+  ports:
+  - port: 32000
+    targetPort: 32000
+    name: control
+    nodePort: 32000
+  - port: 32221
+    targetPort: 32221
+    name: data
+    nodePort: 32221
+  selector:
+    app: qperf
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-external-iperf
+  namespace: testns1
+spec:
+  type: NodePort
+  ports:
+  - port: 32003
+    targetPort: 32003
+    name: iperf
+    nodePort: 32003
+  selector:
+    app: iperf
