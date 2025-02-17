@@ -124,13 +124,26 @@ type TestConfig struct {
 	NumServices         int       `validate:"gte=0"`
 	NumPods             int       `validate:"gte=0"`
 	HostNetwork         bool
-	TestNamespace       string `default:"testns"`
-	Iterations          int    `validate:"gte=0"`
-	Duration            int    `default:"60"`
+	TestNamespace       string      `default:"testns"`
+	Iterations          int         `validate:"gte=0"`
+	Duration            int         `default:"60"`
+	DNSPerf             *DNSConfig  `validate:"required_if=TestKind dnsperf"`
+	Perf                *PerfConfig `validate:"required_if=TestType thruput-latency,required_if=TestType iperf"`
 	CalicoNodeCPULimit  string
-	DNSPerfNumDomains   int         `validate:"gte=0"`
-	DNSPerfMode         DNSPerfMode `validate:"omitempty,oneof=Inline NoDelay DelayDeniedPacket DelayDNSResponse"`
 	LeaveStandingConfig bool
+}
+
+// PerfConfig details which tests to run in thruput-latency and iperf tests.
+type PerfConfig struct {
+	Direct   bool
+	Service  bool
+	External bool
+}
+
+// DNSConfig contains the configuration specific to DNSPerf tests.
+type DNSConfig struct {
+	NumDomains int         `validate:"gte=0"`
+	Mode       DNSPerfMode `validate:"omitempty,oneof=Inline NoDelay DelayDeniedPacket DelayDNSResponse"`
 }
 
 // New returns a new instance of Config.
@@ -211,11 +224,16 @@ func defaultAndValidate(cfg *Config) error {
 			tcfg.TestNamespace = "testns"
 		}
 		if tcfg.TestKind == "dnsperf" {
-			if tcfg.DNSPerfNumDomains == 0 {
-				return fmt.Errorf("non-zero DNSPerfNumDomains is required for a dnsperf test")
+			if tcfg.DNSPerf.NumDomains == 0 {
+				return fmt.Errorf("non-zero NumDomains is required for a dnsperf test")
 			}
-			if tcfg.DNSPerfMode == "" {
-				return fmt.Errorf("DNSPerfMode is required for a dnsperf test")
+			if tcfg.DNSPerf.Mode == "" {
+				return fmt.Errorf("Mode is required for a dnsperf test")
+			}
+		}
+		if tcfg.TestKind == "thruput-latency" || tcfg.TestKind == "iperf" {
+			if tcfg.Perf == nil {
+				tcfg.Perf = &PerfConfig{true, true, false}
 			}
 		}
 	}

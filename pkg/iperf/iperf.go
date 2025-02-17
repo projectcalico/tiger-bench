@@ -162,6 +162,11 @@ type Results struct {
 		Throughput     float64 `json:"throughput,omitempty"`
 		ThroughputUnit string  `json:"throughput_unit,omitempty"`
 	} `json:"service,omitempty"`
+	External struct {
+		Retries        int     `json:"retries,omitempty"`
+		Throughput     float64 `json:"throughput,omitempty"`
+		ThroughputUnit string  `json:"throughput_unit,omitempty"`
+	} `json:"external,omitempty"`
 }
 
 // ResultSummary holds a statistical summary of the results
@@ -179,7 +184,7 @@ type ResultSummary struct {
 }
 
 // RunIperfTests runs the iperf test, to pod and to service
-func RunIperfTests(ctx context.Context, clients config.Clients, testDuration int, namespace string) (*Results, error) {
+func RunIperfTests(ctx context.Context, clients config.Clients, testDuration int, namespace string, perfCfg config.PerfConfig) (*Results, error) {
 	log.Debug("Entering runIperfTests function")
 	results := Results{}
 	var err error
@@ -192,28 +197,38 @@ func RunIperfTests(ctx context.Context, clients config.Clients, testDuration int
 	if len(testpods) < 2 {
 		return &results, fmt.Errorf("expected at least 2 iperf pods, got %d", len(testpods))
 	}
-	podIP := testpods[0].Status.PodIP
-	results.Direct.Retries, results.Direct.Throughput, results.Direct.ThroughputUnit, err = runIperfTest(ctx, clients, &testpods[1], podIP, testDuration)
-	if err != nil {
-		log.WithError(err).Error("error hit running pod-pod iperf test")
-		return &results, err
+	if perfCfg.Direct {
+		podIP := testpods[0].Status.PodIP
+		results.Direct.Retries, results.Direct.Throughput, results.Direct.ThroughputUnit, err = runIperfTest(ctx, clients, &testpods[1], podIP, testDuration)
+		if err != nil {
+			log.WithError(err).Error("error hit running pod-pod iperf test")
+			return &results, err
+		}
 	}
 
 	svcname := fmt.Sprintf("iperf-srv-%s", utils.SanitizeString(testpods[0].Spec.NodeName))
-
 	svc, err := clients.Clientset.CoreV1().Services(namespace).Get(ctx, svcname, metav1.GetOptions{})
 	if err != nil {
 		log.WithError(err).Errorf("failed to list services in ns %s", namespace)
 		return &results, err
 	}
+	if perfCfg.Service {
 
-	svcIP := svc.Spec.ClusterIP
-	results.Service.Retries, results.Service.Throughput, results.Service.ThroughputUnit, err = runIperfTest(ctx, clients, &testpods[1], svcIP, testDuration)
-	if err != nil {
-		log.WithError(err).Warning("Error hit running pod-svc-pod iperf test")
-		return &results, err
+		svcIP := svc.Spec.ClusterIP
+		results.Service.Retries, results.Service.Throughput, results.Service.ThroughputUnit, err = runIperfTest(ctx, clients, &testpods[1], svcIP, testDuration)
+		if err != nil {
+			log.WithError(err).Warning("Error hit running pod-svc-pod iperf test")
+			return &results, err
+		}
 	}
-
+	if perfCfg.External {
+		extIP := svc.Spec.ExternalIPs[0]
+		results.External.Retries, results.External.Throughput, results.External.ThroughputUnit, err = runIperfTest(ctx, clients, nil, extIP, testDuration)
+		if err != nil {
+			log.WithError(err).Error("error hit running pod-svc-pod qperf test")
+			return &results, err
+		}
+	}
 	return &results, nil
 }
 
@@ -222,9 +237,18 @@ func runIperfTest(ctx context.Context, clients config.Clients, srcPod *corev1.Po
 	log.Debug("Entering runIperfTest function")
 
 	cmd := fmt.Sprintf("iperf3 -c %s -P 8 -J -t %d", targetIP, testDuration)
-	stdout, _, err := utils.RetryinPod(ctx, clients, srcPod, cmd, testDuration+30)
-	if err != nil {
-		return 0, 0, "", fmt.Errorf("failed to run iperf command")
+	var stdout string
+	var err error
+	if srcPod != nil {
+		stdout, _, err = utils.RetryinPod(ctx, clients, srcPod, cmd, testDuration+30)
+		if err != nil {
+			return 0, 0, "", fmt.Errorf("failed to run iperf command")
+		}
+	} else {
+		stdout, _, err = utils.Shellout(cmd)
+		if err != nil {
+			return 0, 0, "", fmt.Errorf("failed to run iperf command")
+		}
 	}
 	return parseIperfOutput(stdout)
 }

@@ -46,6 +46,12 @@ type Results struct {
 		Throughput     float64 `json:"throughput,omitempty"`
 		ThroughputUnit string  `json:"throughput_unit,omitempty"`
 	} `json:"service,omitempty"`
+	External struct {
+		Latency        float64 `json:"latency,omitempty"`
+		LatencyUnit    string  `json:"latency_unit,omitempty"`
+		Throughput     float64 `json:"throughput,omitempty"`
+		ThroughputUnit string  `json:"throughput_unit,omitempty"`
+	} `json:"external,omitempty"`
 }
 
 // ResultSummary holds a statistical summary of the results
@@ -63,7 +69,7 @@ type ResultSummary struct {
 }
 
 // RunQperfTests runs the qperf test, to pod and to service
-func RunQperfTests(ctx context.Context, clients config.Clients, testDuration int, namespace string) (*Results, error) {
+func RunQperfTests(ctx context.Context, clients config.Clients, testDuration int, namespace string, perfCfg config.PerfConfig) (*Results, error) {
 	log.Debug("Entering runQperfTests function")
 	results := Results{}
 	var err error
@@ -75,11 +81,13 @@ func RunQperfTests(ctx context.Context, clients config.Clients, testDuration int
 	if len(testpods) < 2 {
 		return &results, fmt.Errorf("expected at least 2 qperf pods, got %d", len(testpods))
 	}
-	podIP := testpods[0].Status.PodIP
-	results.Direct.Latency, results.Direct.LatencyUnit, results.Direct.Throughput, results.Direct.ThroughputUnit, err = runQperfTest(ctx, clients, &testpods[1], podIP, testDuration, namespace)
-	if err != nil {
-		log.WithError(err).Errorf("error hit running pod-pod qperf test")
-		return &results, err
+	if perfCfg.Direct {
+		podIP := testpods[0].Status.PodIP
+		results.Direct.Latency, results.Direct.LatencyUnit, results.Direct.Throughput, results.Direct.ThroughputUnit, err = runQperfTest(ctx, clients, &testpods[1], podIP, testDuration, namespace)
+		if err != nil {
+			log.WithError(err).Errorf("error hit running pod-pod qperf test")
+			return &results, err
+		}
 	}
 	svcname := fmt.Sprintf("qperf-srv-%s", utils.SanitizeString(testpods[0].Spec.NodeName))
 	svc, err := clients.Clientset.CoreV1().Services(namespace).Get(ctx, svcname, metav1.GetOptions{})
@@ -87,12 +95,21 @@ func RunQperfTests(ctx context.Context, clients config.Clients, testDuration int
 		log.WithError(err).Errorf("failed to list services in ns %s", namespace)
 		return &results, err
 	}
-
-	svcIP := svc.Spec.ClusterIP
-	results.Service.Latency, results.Service.LatencyUnit, results.Service.Throughput, results.Service.ThroughputUnit, err = runQperfTest(ctx, clients, &testpods[1], svcIP, testDuration, namespace)
-	if err != nil {
-		log.WithError(err).Error("error hit running pod-svc-pod qperf test")
-		return &results, err
+	if perfCfg.Service {
+		svcIP := svc.Spec.ClusterIP
+		results.Service.Latency, results.Service.LatencyUnit, results.Service.Throughput, results.Service.ThroughputUnit, err = runQperfTest(ctx, clients, &testpods[1], svcIP, testDuration, namespace)
+		if err != nil {
+			log.WithError(err).Error("error hit running pod-svc-pod qperf test")
+			return &results, err
+		}
+	}
+	if perfCfg.External {
+		extIP := svc.Spec.ExternalIPs[0]
+		results.External.Latency, results.External.LatencyUnit, results.External.Throughput, results.External.ThroughputUnit, err = runQperfTest(ctx, clients, nil, extIP, testDuration, namespace)
+		if err != nil {
+			log.WithError(err).Error("error hit running pod-svc-pod qperf test")
+			return &results, err
+		}
 	}
 	return &results, nil
 }
@@ -107,9 +124,17 @@ func runQperfTest(ctx context.Context, clients config.Clients, srcPod *corev1.Po
 		return 0, "", 0, "", fmt.Errorf("failed to wait for qperf pods to be ready")
 	}
 	cmd := fmt.Sprintf("qperf %s -t %d -vv -ub -lp 4000 -ip 4001 tcp_bw tcp_lat", targetIP, testDuration)
-	stdout, _, err = utils.RetryinPod(ctx, clients, srcPod, cmd, testDuration*2+60) // the *2 is because we're running two tests: tcp_bw and tcp_lat
-	if err != nil {
-		return 0, "", 0, "", fmt.Errorf("failed to run qperf command")
+	if srcPod != nil {
+		stdout, _, err = utils.RetryinPod(ctx, clients, srcPod, cmd, testDuration*2+60) // the *2 is because we're running two tests: tcp_bw and tcp_lat
+		if err != nil {
+			return 0, "", 0, "", fmt.Errorf("failed to run qperf command")
+		}
+	} else {
+		// srcPod is nil, so we're running the test from this host
+		stdout, _, err = utils.Shellout(cmd)
+		if err != nil {
+			return 0, "", 0, "", fmt.Errorf("failed to run qperf command")
+		}
 	}
 
 	output := parseQperfOutput(stdout)

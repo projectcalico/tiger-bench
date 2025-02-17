@@ -88,7 +88,7 @@ func main() {
 			}
 			log.Info("Running iperf tests, Iterations=", testConfig.Iterations)
 			for j := 0; j < testConfig.Iterations; j++ {
-				iperfResult, err := iperf.RunIperfTests(ctx, clients, testConfig.Duration, testConfig.TestNamespace)
+				iperfResult, err := iperf.RunIperfTests(ctx, clients, testConfig.Duration, testConfig.TestNamespace, *testConfig.Perf)
 				if err != nil {
 					log.WithError(err).Error("failed to get iperf results")
 				}
@@ -113,7 +113,7 @@ func main() {
 			}
 			for j := 0; j < testConfig.Iterations; j++ {
 				log.Debug("entering qperf loop")
-				qperfResult, err := qperf.RunQperfTests(ctx, clients, testConfig.Duration, testConfig.TestNamespace)
+				qperfResult, err := qperf.RunQperfTests(ctx, clients, testConfig.Duration, testConfig.TestNamespace, *testConfig.Perf)
 				if err != nil {
 					log.WithError(err).Error("failed to get qperf results")
 				}
@@ -128,7 +128,7 @@ func main() {
 				}
 			}
 		case config.TestKindDNSPerf:
-			_, err = policy.GetOrCreateDNSPolicy(ctx, clients, dnsperf.MakeDNSPolicy(testConfig.TestNamespace, testPolicyName, testConfig.DNSPerfNumDomains))
+			_, err = policy.GetOrCreateDNSPolicy(ctx, clients, dnsperf.MakeDNSPolicy(testConfig.TestNamespace, testPolicyName, testConfig.DNSPerf.NumDomains))
 			if err != nil {
 				log.WithError(err).Fatal("failed to create dnsperf policy")
 			}
