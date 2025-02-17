@@ -142,11 +142,7 @@ func CreateTestPolicy(ctx context.Context, clients config.Clients, testPolicyNam
 		},
 	}
 
-	ingressPeers := []networkingv1.NetworkPolicyPeer{
-		{
-			PodSelector: &podSelector,
-		},
-	}
+	ingressPeers := []networkingv1.NetworkPolicyPeer{}
 	// delete policy to ensure it does not exist
 	err := DeletePolicy(ctx, clients, testPolicyName, namespace)
 	if err != nil {

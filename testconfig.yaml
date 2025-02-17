@@ -1,18 +1,37 @@
+# - testKind: iperf
+#   numPolicies: 5
+#   numServices: 10
+#   numPods: 7
+#   duration: 10
+#   hostNetwork: false
+#   iterations: 0
+#   leaveStandingConfig: false
+#   Perf:
+#     Port: 32003
+#     direct: false
+#     service: false
+#     external: true
+#     # ExternalIPOrFQDN: "aaa14062c841946f2abe389c483c67e0-1200736760.us-west-2.elb.amazonaws.com"
+#     ExternalIPOrFQDN: "34.213.205.24"
+#     TestPort: 32101
 - testKind: thruput-latency
   numPolicies: 5
   numServices: 10
   numPods: 7
-  duration: 5
+  duration: 10
   hostNetwork: false
-  encap: vxlan
-  dataplane: iptables
-  iterations: 3
-- testKind: thruput-latency
-  numPolicies: 20
-  numServices: 3
-  numPods: 9
-  duration: 4
-  hostNetwork: true
-  encap: none
-  dataplane: bpf
   iterations: 1
+  leaveStandingConfig: true
+  TestNamespace: testns1
+  Perf:
+    Port: 32000
+    direct: false
+    service: false
+    external: true
+    # ExternalIPOrFQDN: "a931feac8eaa14a8b81a19792e59d6db-1591879926.us-west-2.elb.amazonaws.com"
+    ExternalIPOrFQDN: "ec2-34-213-205-24.us-west-2.compute.amazonaws.com"
+    # ControlPort: 31106
+    # TestPort: 32444
+    # ExternalIPOrFQDN: "test-external-qperf.testns"
+    ControlPort: 32000
+    TestPort: 32221
