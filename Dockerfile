@@ -12,7 +12,9 @@ RUN go mod download
 RUN GO111MODULE=on CGO_ENABLED=0 GOOS=linux go build cmd/benchmark.go
 RUN mkdir /results
 
-FROM scratch
+FROM alpine:3.21
+RUN apk add --no-cache iperf3
+RUN apk add --no-cache --repository http://dl-3.alpinelinux.org/alpine/edge/testing/ qperf
 COPY --from=builder /results /results
 COPY --from=builder /benchmark/benchmark /benchmark
 ENV KUBECONFIG="/kubeconfig"
