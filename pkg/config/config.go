@@ -161,7 +161,7 @@ func New(ctx context.Context) (Config, Clients, error) {
 		defer cancel()
 		err = clients.CtrlClient.Get(myctx, ctrlclient.ObjectKey{Name: "default"}, info)
 		if err != nil {
-			return config, clients, fmt.Errorf("failed to get cluster information")
+			return config, clients, err
 		}
 		log.Debug("cluster information is ", info)
 		config.CalicoVersion = info.Spec.CalicoVersion
