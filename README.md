@@ -23,9 +23,13 @@ It also provides a framework for us to extend later with other tests.
    -v "${PWD}":/results \
    -v ${KUBECONFIG}:/kubeconfig \
    -v ${PWD}/testconfig.yaml:/testconfig.yaml \
-   -e WEBSERVER_IMAGE="quay.io/tigeradev/tiger-bench-nginx:v0.1.0" \
-   -e PERF_IMAGE="quay.io/tigeradev/tiger-bench-perf:v0.1.0" \
-   quay.io/tigeradev/tiger-bench:v0.1.0
+   -v $HOME/.aws:/root/.aws \
+   -e AWS_SECRET_ACCESS_KEY \
+   -e AWS_ACCESS_KEY_ID \
+   -e LOG_LEVEL=INFO \
+   -e WEBSERVER_IMAGE="quay.io/tigeradev/tiger-bench-nginx:v0.1.2" \
+   -e PERF_IMAGE="quay.io/tigeradev/tiger-bench-perf:v0.1.2" \
+   quay.io/tigeradev/tiger-bench:v0.1.2
    ```
 1. See results in the `results.json` file in your local directory!
 
@@ -55,15 +59,20 @@ docker run --rm --net=host \
 -v "${PWD}":/results \
 -v ${KUBECONFIG}:/kubeconfig \
 -v ${PWD}/testconfig.yaml:/testconfig.yaml \
--e WEBSERVER_IMAGE="quay.io/tigeradev/tiger-bench-nginx:v0.1.0" \
--e PERF_IMAGE="quay.io/tigeradev/tiger-bench-perf:v0.1.0" \
-quay.io/tigeradev/tiger-bench:v0.1.0
+-v $HOME/.aws:/root/.aws \
+-e AWS_SECRET_ACCESS_KEY \
+-e AWS_ACCESS_KEY_ID \
+-e WEBSERVER_IMAGE="quay.io/tigeradev/tiger-bench-nginx:v0.1.2" \
+-e PERF_IMAGE="quay.io/tigeradev/tiger-bench-perf:v0.1.2" \
+quay.io/tigeradev/tiger-bench:v0.1.2
 ```
 
 The tool runs in the hosts network namespace to ensure it has the same access as a user running kubectl on the host.
 
 kubeconfig is passed to the tool by the `KUBECONFIG` env var, which is used to mount the kubeconfig file into the container.
 Results are written to the `/results` directory in the container, which has mounted the current directory in this case, so results will appear in the users current directory.
+
+The user's `$HOME/.aws` directory, `AWS_SECRET_ACCESS_KEY` and `AWS_ACCESS_KEY_ID` are mounted into the container to provide AWS authentication. EKS clusters use aws-iam-authenticator in addition to the certificates in the kubeconfig file to provide an additional layer of control.  If you're not running this tool against an EKS cluster, these can be left out of the `docker run` command.
 
 `WEBSERVER_IMAGE` and `PERF_IMAGE` specify the images that should be used by the tool. The webserver image is used for standing pods, while the perf image contains the iperf and qperf binaries and is used for the iperf and qperf tests. If not specified, they default to the values in the command above.
 If you are in an environment with a private docker registry, you should copy the images into it, and use these env vars to tell the tool the private registry names.
