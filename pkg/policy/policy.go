@@ -45,7 +45,7 @@ func DeployPolicies(ctx context.Context, clients config.Clients, numPolicies int
 	}
 
 	// deploy policies
-	currentNumPolicies, err := countPolicies(ctx, clients, namespace)
+	currentNumPolicies, err := countPolicies(ctx, clients, namespace, "policy-")
 	if err != nil {
 		return err
 	}
@@ -159,16 +159,23 @@ func CreateTestPolicy(ctx context.Context, clients config.Clients, testPolicyNam
 	return createPolicy(ctx, clients, testPolicyName, namespace, podSelector, ingressPeers, ports)
 }
 
-func countPolicies(ctx context.Context, clients config.Clients, namespace string) (int, error) {
+func countPolicies(ctx context.Context, clients config.Clients, namespace string, prefix string) (int, error) {
 	log.Debug("Entering countPolicies function")
 	// count policies
+	count := 0
 	childCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	policies, err := clients.Clientset.NetworkingV1().NetworkPolicies(namespace).List(childCtx, metav1.ListOptions{})
+	for _, policy := range policies.Items {
+		// if policy name starts with prefix, increment count
+		if policy.Name[:len(prefix)] == prefix {
+			count++
+		}
+	}
 	if err != nil {
 		return 0, fmt.Errorf("failed to list policies")
 	}
-	return len(policies.Items), nil
+	return count, nil
 }
 
 // DeletePolicy deletes a policy
