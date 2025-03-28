@@ -18,6 +18,7 @@ ARG AWS_IAM_AUTHENTICATOR_URL=https://github.com/kubernetes-sigs/aws-iam-authent
 ADD ${AWS_IAM_AUTHENTICATOR_URL} /usr/local/bin/aws-iam-authenticator
 RUN apk add --update ca-certificates gettext && \
     chmod +x /usr/local/bin/aws-iam-authenticator
+RUN apk add --no-cache aws-cli
 
 COPY --from=builder /results /results
 COPY --from=builder /benchmark/benchmark /benchmark
