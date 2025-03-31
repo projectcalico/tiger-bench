@@ -78,21 +78,20 @@ func main() {
 		switch testConfig.TestKind {
 		case config.TestKindIperf:
 			var iperfResults []*iperf.Results
-			err = iperf.CreateTestPolicy(ctx, clients, testPolicyName, testConfig.TestNamespace)
+			err = policy.CreateTestPolicy(ctx, clients, testPolicyName, testConfig.TestNamespace, []int{testConfig.Perf.TestPort})
 			if err != nil {
 				log.WithError(err).Fatal("failed to create iperf test policy")
 			}
-			err = iperf.DeployIperfPods(ctx, clients, testConfig.TestNamespace, testConfig.HostNetwork, cfg.PerfImage)
+			err = iperf.DeployIperfPods(ctx, clients, testConfig.TestNamespace, testConfig.HostNetwork, cfg.PerfImage, testConfig.Perf.TestPort)
 			if err != nil {
 				log.WithError(err).Fatal("failed to deploy iperf pods")
 			}
 			log.Info("Running iperf tests, Iterations=", testConfig.Iterations)
 			for j := 0; j < testConfig.Iterations; j++ {
-				iperfResult, err := iperf.RunIperfTests(ctx, clients, testConfig.Duration, testConfig.TestNamespace)
+				iperfResult, err := iperf.RunIperfTests(ctx, clients, testConfig.Duration, testConfig.TestNamespace, *testConfig.Perf)
 				if err != nil {
 					log.WithError(err).Error("failed to get iperf results")
 				}
-				log.Infof("iperf results: podretries=%d, podthroughput=%.3f, svcretries=%d, svcthroughput=%.3f", iperfResult.Direct.Retries, iperfResult.Direct.Throughput, iperfResult.Service.Retries, iperfResult.Service.Throughput)
 				iperfResults = append(iperfResults, iperfResult)
 			}
 			if len(iperfResults) > 0 {
@@ -103,32 +102,31 @@ func main() {
 			}
 		case config.TestKindQperf:
 			var qperfResults []*qperf.Results
-			err = qperf.CreateTestPolicy(ctx, clients, testPolicyName, testConfig.TestNamespace)
+			err = policy.CreateTestPolicy(ctx, clients, testPolicyName, testConfig.TestNamespace, []int{testConfig.Perf.ControlPort, testConfig.Perf.TestPort})
 			if err != nil {
 				log.WithError(err).Fatal("failed to create qperf test policy")
 			}
-			err = qperf.DeployQperfPods(ctx, clients, testConfig.TestNamespace, testConfig.HostNetwork, cfg.PerfImage)
+			err = qperf.DeployQperfPods(ctx, clients, testConfig.TestNamespace, testConfig.HostNetwork, cfg.PerfImage, testConfig.Perf.ControlPort, testConfig.Perf.TestPort)
 			if err != nil {
 				log.WithError(err).Fatal("failed to deploy qperf pods")
 			}
 			for j := 0; j < testConfig.Iterations; j++ {
 				log.Debug("entering qperf loop")
-				qperfResult, err := qperf.RunQperfTests(ctx, clients, testConfig.Duration, testConfig.TestNamespace)
+				qperfResult, err := qperf.RunQperfTests(ctx, clients, testConfig.Duration, testConfig.TestNamespace, *testConfig.Perf)
 				if err != nil {
 					log.WithError(err).Error("failed to get qperf results")
 				}
-				log.Infof("qperf results: podlatency=%.1f, podthroughput=%.1f, svclatency=%.1f, svcthroughput=%.1f", qperfResult.Direct.Latency, qperfResult.Direct.Throughput, qperfResult.Service.Latency, qperfResult.Service.Throughput)
 				qperfResults = append(qperfResults, qperfResult)
 				log.Debug("length of Results: ", len(qperfResults))
 			}
 			if len(qperfResults) > 0 {
 				thisResult.QPerf, err = qperf.SummarizeResults(qperfResults)
 				if err != nil {
-					log.WithError(err).Error("failed to summarize iperf results")
+					log.WithError(err).Error("failed to summarize qperf results")
 				}
 			}
 		case config.TestKindDNSPerf:
-			_, err = policy.GetOrCreateDNSPolicy(ctx, clients, dnsperf.MakeDNSPolicy(testConfig.TestNamespace, testPolicyName, testConfig.DNSPerfNumDomains))
+			_, err = policy.GetOrCreateDNSPolicy(ctx, clients, dnsperf.MakeDNSPolicy(testConfig.TestNamespace, testPolicyName, testConfig.DNSPerf.NumDomains))
 			if err != nil {
 				log.WithError(err).Fatal("failed to create dnsperf policy")
 			}
@@ -141,9 +139,34 @@ func main() {
 			log.Fatal("test type unknown")
 		}
 		if !testConfig.LeaveStandingConfig {
-			err = utils.DeleteNamespace(ctx, clients, testConfig.TestNamespace)
+			// Clean up all the resources we might have created, apart from the namespace, which might have
+			err = utils.DeleteDeployment(ctx, clients, testConfig.TestNamespace, "standing-deployment")
 			if err != nil {
-				log.WithError(err).Fatal("failed to delete namespace")
+				log.WithError(err).Fatal("failed to delete standing-deployment")
+			}
+			err = utils.DeleteDeployment(ctx, clients, testConfig.TestNamespace, "standing-svc")
+			if err != nil {
+				log.WithError(err).Fatal("failed to delete standing-svc")
+			}
+			err = utils.DeleteServices(ctx, clients, testConfig.TestNamespace, "standing-svc")
+			if err != nil {
+				log.WithError(err).Fatal("failed to delete standing-svc")
+			}
+			err = utils.DeleteServices(ctx, clients, testConfig.TestNamespace, "iperf-srv")
+			if err != nil {
+				log.WithError(err).Fatal("failed to delete iperf-srv")
+			}
+			err = utils.DeleteServices(ctx, clients, testConfig.TestNamespace, "qperf-srv")
+			if err != nil {
+				log.WithError(err).Fatal("failed to delete qperf-srv")
+			}
+			err = utils.DeletePods(ctx, clients, testConfig.TestNamespace, "app=iperf")
+			if err != nil {
+				log.WithError(err).Fatal("failed to delete iperf pods")
+			}
+			err = utils.DeletePods(ctx, clients, testConfig.TestNamespace, "app=qperf")
+			if err != nil {
+				log.WithError(err).Fatal("failed to delete qperf pods")
 			}
 		}
 		// If we set the CPU limit, unset it again.

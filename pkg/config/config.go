@@ -124,13 +124,29 @@ type TestConfig struct {
 	NumServices         int       `validate:"gte=0"`
 	NumPods             int       `validate:"gte=0"`
 	HostNetwork         bool
-	TestNamespace       string `default:"testns"`
-	Iterations          int    `validate:"gte=0"`
-	Duration            int    `default:"60"`
+	TestNamespace       string      `default:"testns"`
+	Iterations          int         `validate:"gte=0"`
+	Duration            int         `default:"60"`
+	DNSPerf             *DNSConfig  `validate:"required_if=TestKind dnsperf"`
+	Perf                *PerfConfig `validate:"required_if=TestType thruput-latency,required_if=TestType iperf"`
 	CalicoNodeCPULimit  string
-	DNSPerfNumDomains   int         `validate:"gte=0"`
-	DNSPerfMode         DNSPerfMode `validate:"omitempty,oneof=Inline NoDelay DelayDeniedPacket DelayDNSResponse"`
 	LeaveStandingConfig bool
+}
+
+// PerfConfig details which tests to run in thruput-latency and iperf tests.
+type PerfConfig struct {
+	Direct          bool   // Whether to do a direct pod-pod test
+	Service         bool   // Whether to do a pod-service-pod test
+	External        bool   // Whether to test from this container to the external IP for an external-service-pod test
+	ControlPort     int    // The port to use for the control connection in tests.  Used by qperf tests.
+	TestPort        int    // The port to use for the test connection in tests.  Used by qperf and iperf tests
+	ExternalIPOrFQDN string // The external IP or DNS name to connect to for an external-service-pod test
+}
+
+// DNSConfig contains the configuration specific to DNSPerf tests.
+type DNSConfig struct {
+	NumDomains int         `validate:"gte=0"`
+	Mode       DNSPerfMode `validate:"omitempty,oneof=Inline NoDelay DelayDeniedPacket DelayDNSResponse"`
 }
 
 // New returns a new instance of Config.
@@ -142,6 +158,12 @@ func New(ctx context.Context) (Config, Clients, error) {
 	if err != nil {
 		return config, clients, err
 	}
+
+	loglevel, err := log.ParseLevel(config.LogLevel)
+	if err != nil {
+		log.WithError(err).Fatal("failed to parse log level")
+	}
+	log.SetLevel(loglevel)
 
 	// load testconfigs from file
 	err = loadTestConfigsFromFile(&config)
@@ -161,7 +183,8 @@ func New(ctx context.Context) (Config, Clients, error) {
 		defer cancel()
 		err = clients.CtrlClient.Get(myctx, ctrlclient.ObjectKey{Name: "default"}, info)
 		if err != nil {
-			return config, clients, fmt.Errorf("failed to get cluster information")
+			log.WithError(err).Error("failed to get cluster information")
+			return config, clients, err
 		}
 		log.Debug("cluster information is ", info)
 		config.CalicoVersion = info.Spec.CalicoVersion
@@ -211,11 +234,36 @@ func defaultAndValidate(cfg *Config) error {
 			tcfg.TestNamespace = "testns"
 		}
 		if tcfg.TestKind == "dnsperf" {
-			if tcfg.DNSPerfNumDomains == 0 {
-				return fmt.Errorf("non-zero DNSPerfNumDomains is required for a dnsperf test")
+			if tcfg.DNSPerf.NumDomains == 0 {
+				return fmt.Errorf("non-zero NumDomains is required for a dnsperf test")
 			}
-			if tcfg.DNSPerfMode == "" {
-				return fmt.Errorf("DNSPerfMode is required for a dnsperf test")
+			if tcfg.DNSPerf.Mode == "" {
+				return fmt.Errorf("Mode is required for a dnsperf test")
+			}
+		}
+		if tcfg.TestKind == "thruput-latency" || tcfg.TestKind == "iperf" {
+			if tcfg.Perf == nil {
+				tcfg.Perf = &PerfConfig{true, true, false, 32000, 0, ""}  // Default so that old configs don't break
+				continue
+			}
+			if tcfg.Perf.External {
+				if tcfg.Perf.ExternalIPOrFQDN == "" {
+					return fmt.Errorf("ExternalIPOrFQDN is required for an external thruput-latency test")
+				}
+				if tcfg.TestKind == "thruput-latency" {
+					if tcfg.Perf.ControlPort == 0 {
+						return fmt.Errorf("ControlPort is required for an external thruput-latency test")
+					}
+					if tcfg.Perf.ControlPort > 65535 || tcfg.Perf.ControlPort < 1 {
+						return fmt.Errorf("ControlPort must be between 1 and 65535")
+					}
+				}
+				if tcfg.Perf.TestPort == 0 {
+					return fmt.Errorf("TestPort is required for an external thruput-latency test")
+				}
+				if tcfg.Perf.TestPort > 65535 || tcfg.Perf.TestPort < 1 {
+					return fmt.Errorf("TestPort must be between 1 and 65535")
+				}
 			}
 		}
 	}

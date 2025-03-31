@@ -89,9 +89,15 @@ A list of test run definitions are provided as [`testconfig.yaml`](testconfig.ya
   numPods: 7
   duration: 5
   hostNetwork: false
-  encap: vxlan
-  dataplane: iptables
-  iterations: 3
+  iterations: 1
+  leaveStandingConfig: true
+  Perf:
+    direct: true
+    service: true
+    external: true
+    ControlPort: 32000,
+    TestPort: 32221,
+    ExternalIPOrFQDN: "a6c519e4e9d5a46d795e0d41bf82e93f-1429478103.us-west-2.elb.amazonaws.com"
 - testKind: thruput-latency
   numPolicies: 20
   numServices: 3
@@ -119,6 +125,23 @@ There are 2 tests requested in this example config.
 `testNamespace` specifies the namespace that should be used for this test. All standing resources and test resources will be created within this namespace. In this example it was omitted, so the test will use `testns`.
 
 `iterations` specifies the number of times the measurement should be repeated. Note that a single iteration will include 2 runs of qperf - one direct pod-pod and the other pod-service-pod. If you just want to set up standing config, `iterations` can be set to zero.
+
+`Perf` defines extra settings for `thruput-latency` tests. if you do not specify Perf, it defaults the following (to preserve behaviour with existing test config files):
+
+```
+direct: true
+service: true
+external: false
+```
+
+`direct` is a boolean, which determines whether the test should run a direct pod-to-pod test.
+`service` is a boolean, which determines whether the test should run a pod-to-service-to-pod test.
+`external` is a boolean, which determines whether the test should run a test from whereever this test is being run to an externally exposed service.
+If `external=true`, you must also supply `ExternalIPOrFQDN`, `TestPort` and `ControlPort` (for a thruput-latency test) to tell the test the IP and ports it should connect to. The ExternalIPOrFQDN will be whatever is exposed to the world, and might be a LoadBalancer IP, or a node IP, or something else, depending on how you exposed the service.  The Test and Control ports need to be the same as used on the test server pod (because the test tools were not designed to work in an environment with NAT).
+
+Note that the tool will NOT expose the services for you, because there are too many different ways to expose services to the world. You will need to expose pods with the label `app: qperf` in the test namespace to the world for this test to work. An example of exposing these pods using NodePorts can be found in `external_service_example.yaml`.  If you wanted to change that to use a LoadBalancer, simply change `type: NodePort` to `type: LoadBalancer`.
+
+For `thruput-latency` tests, you will need to expose 2 ports from those pods: A TCP `TestPort` and a `ControlPort`. You must not map the port numbers between the pod and the external service, but they do NOT need to be consecutive.  i.e. if you specify TestPort=32221, the pod will listen on port 32221 and whatever method you use to expose that service to the outside world must also use that port number.
 
 ### Settings which can reconfigure your cluster
 
@@ -153,10 +176,12 @@ For a "thruput-latency" test, the tool will:
 - Wait for those to come up.
 - Create a pair of (optionally host-networked) pods, on different nodes (with the `tigera.io/test-nodepool=default-pool` label) to run the test between. Wait for them to be running.
 - Create a service for each of the test pods (for use in the pod-svc-pod scenario)
-- Execute qperf direct between the two pods for the configured duration: `qperf <ip> -t <duration> -vv -ub -lp 4000 -ip 4001 tcp_bw tcp_lat`
+- Execute qperf direct between the two pods for the configured duration (if configured to do so): `qperf <ip> -t <duration> -vv -ub -lp 32000 -ip 32001 tcp_bw tcp_lat`
 - Collects the output from qperf and parses it to collect latency and throughput results.
-- Repeat the qperf command, this time using the service IP for that pod.
-- Repeat the pair of qperf commands for the given number of iterations (re-using the same pods)
+- Repeat the qperf command, this time using the service IP for that pod (if configured to do so)
+- Collects the output from qperf and parses it to collect latency and throughput results.
+- Repeat the qperf command, this time using the External IP and Ports for the exposed service (if configured to do so)
+- Repeat the set of qperf commands for the given number of iterations (re-using the same pods)
 - Collate results and compute min/max/average/50/75/90/99th percentiles
 - Output that summary into a JSON format results file.
 - Optionally delete the test namespace (which will cause all test resources within it to be deleted)
@@ -164,90 +189,115 @@ For a "thruput-latency" test, the tool will:
 
 This test measures Latency and Throughput.
 
-An example result from a "thruput-latency" test looks like:
+An example result from a "thruput-latency" test might look like:
 
 ```
   {
     "config": {
       "TestKind": "thruput-latency",
-      "Encap": "none",
-      "Dataplane": "bpf",
+      "Encap": "",
+      "Dataplane": "",
       "NumPolicies": 5,
       "NumServices": 10,
       "NumPods": 7,
-      "HostNetwork": true,
+      "HostNetwork": false,
       "TestNamespace": "testns",
-      "Iterations": 3,
-      "Duration": 5,
+      "Iterations": 1,
+      "Duration": 10,
+      "DNSPerf": null,
+      "Perf": {
+        "Direct": true,
+        "Service": true,
+        "External": true,
+        "ControlPort": 32000,
+        "TestPort": 32221,
+        "ExternalIPOrFQDN": "a6c519e4e9d5a46d795e0d41bf82e93f-1429478103.us-west-2.elb.amazonaws.com"
+      },
       "CalicoNodeCPULimit": "",
-      "DNSPerfNumDomains": 0,
-      "DNSPerfMode": "",
       "LeaveStandingConfig": false
     },
     "ClusterDetails": {
       "Cloud": "unknown",
       "Provisioner": "kubeadm",
       "NodeType": "linux",
-      "NodeOS": "Debian GNU/Linux 12 (bookworm)",
-      "NodeKernel": "6.8.0-51-generic",
+      "NodeOS": "Ubuntu 20.04.6 LTS",
+      "NodeKernel": "5.15.0-1078-gcp",
       "NodeArch": "amd64",
-      "NumNodes": 4,
+      "NumNodes": 7,
       "Dataplane": "bpf",
       "IPFamily": "ipv4",
-      "Encapsulation": "None",
+      "Encapsulation": "VXLANCrossSubnet",
       "WireguardEnabled": false,
       "Product": "calico",
-      "CalicoVersion": "v3.29.1-32-gb71c83063aa1",
-      "K8SVersion": "v1.32.0",
-      "CRIVersion": "containerd://1.7.24",
+      "CalicoVersion": "v3.30.0-0.dev-722-g4ff3cb04272f",
+      "K8SVersion": "v1.31.7",
+      "CRIVersion": "containerd://1.7.25",
       "CNIOption": "Calico"
     },
     "thruput-latency": {
       "Latency": {
         "pod-pod": {
-          "min": 14.6,
-          "max": 16.3,
-          "avg": 15.333333333333334,
-          "P50": 15.1,
-          "P75": 16.3,
-          "P90": 16.3,
-          "P99": 16.3,
+          "min": 204,
+          "max": 204,
+          "avg": 204,
+          "P50": 204,
+          "P75": 204,
+          "P90": 204,
+          "P99": 204,
           "unit": "us"
         },
         "pod-svc-pod": {
-          "min": 14.9,
-          "max": 15.2,
-          "avg": 15.033333333333331,
-          "P50": 15,
-          "P75": 15.2,
-          "P90": 15.2,
-          "P99": 15.2,
+          "min": 195,
+          "max": 195,
+          "avg": 195,
+          "P50": 195,
+          "P75": 195,
+          "P90": 195,
+          "P99": 195,
           "unit": "us"
         },
-        "ext-svc-pod": {}
+        "ext-svc-pod": {
+          "min": 55600,
+          "max": 55600,
+          "avg": 55600,
+          "P50": 55600,
+          "P75": 55600,
+          "P90": 55600,
+          "P99": 55600,
+          "unit": "us"
+        }
       },
       "Throughput": {
         "pod-pod": {
-          "min": 23500,
-          "max": 24400,
-          "avg": 24000,
-          "P50": 24100,
-          "P75": 24400,
-          "P90": 24400,
-          "P99": 24400,
+          "min": 2120,
+          "max": 2120,
+          "avg": 2120,
+          "P50": 2120,
+          "P75": 2120,
+          "P90": 2120,
+          "P99": 2120,
           "unit": "Mb/sec"
         },
         "pod-svc-pod": {
-          "min": 23400,
-          "max": 23900,
-          "avg": 23566.666666666668,
-          "P50": 23400,
-          "P75": 23900,
-          "P90": 23900,
-          "P99": 23900,
+          "min": 2120,
+          "max": 2120,
+          "avg": 2120,
+          "P50": 2120,
+          "P75": 2120,
+          "P90": 2120,
+          "P99": 2120,
           "unit": "Mb/sec"
         },
-        "ext-svc-pod": {}
+        "ext-svc-pod": {
+          "min": 9.8,
+          "max": 9.8,
+          "avg": 9.8,
+          "P50": 9.8,
+          "P75": 9.8,
+          "P90": 9.8,
+          "P99": 9.8,
+          "unit": "Mb/sec"
+        }
       }
     }
   },
@@ -255,6 +305,4 @@ An example result from a "thruput-latency" test looks like:
 
 `config` contains the configuration requested in the test definition.
 `ClusterDetails` contains information collected about the cluster at the time of the test.
-`qperf` contains a statistical summary of the raw qperf results - latency and throughput for a direct pod-pod test and via a service. Units are given in the result.
-
-"ext-svc-pod" tests are coming soon.
+`thruput-latency` contains a statistical summary of the raw qperf results - latency and throughput for a direct pod-pod test and via a service. Units are given in the result.
