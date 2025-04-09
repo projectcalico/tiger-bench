@@ -20,7 +20,6 @@ import (
 	"fmt"
 
 	"github.com/projectcalico/tiger-bench/pkg/config"
-	"github.com/projectcalico/tiger-bench/pkg/policy"
 	"github.com/projectcalico/tiger-bench/pkg/stats"
 
 	log "github.com/sirupsen/logrus"
@@ -162,6 +161,11 @@ type Results struct {
 		Throughput     float64 `json:"throughput,omitempty"`
 		ThroughputUnit string  `json:"throughput_unit,omitempty"`
 	} `json:"service,omitempty"`
+	External struct {
+		Retries        int     `json:"retries,omitempty"`
+		Throughput     float64 `json:"throughput,omitempty"`
+		ThroughputUnit string  `json:"throughput_unit,omitempty"`
+	} `json:"external,omitempty"`
 }
 
 // ResultSummary holds a statistical summary of the results
@@ -179,12 +183,13 @@ type ResultSummary struct {
 }
 
 // RunIperfTests runs the iperf test, to pod and to service
-func RunIperfTests(ctx context.Context, clients config.Clients, testDuration int, namespace string) (*Results, error) {
+func RunIperfTests(ctx context.Context, clients config.Clients, testDuration int, namespace string, perfCfg config.PerfConfig) (*Results, error) {
 	log.Debug("Entering runIperfTests function")
 	results := Results{}
 	var err error
+	var testpods []corev1.Pod
 
-	testpods, err := utils.WaitForTestPods(ctx, clients, namespace, "app=iperf")
+	testpods, err = utils.WaitForTestPods(ctx, clients, namespace, "app=iperf")
 	if err != nil {
 		log.WithError(err).Error("failed to get testpods")
 		return &results, err
@@ -192,80 +197,103 @@ func RunIperfTests(ctx context.Context, clients config.Clients, testDuration int
 	if len(testpods) < 2 {
 		return &results, fmt.Errorf("expected at least 2 iperf pods, got %d", len(testpods))
 	}
-	podIP := testpods[0].Status.PodIP
-	results.Direct.Retries, results.Direct.Throughput, results.Direct.ThroughputUnit, err = runIperfTest(ctx, clients, &testpods[1], podIP, testDuration)
-	if err != nil {
-		log.WithError(err).Error("error hit running pod-pod iperf test")
-		return &results, err
+	if perfCfg.Direct {
+		log.Info("Running pod-pod iperf test")
+		podIP := testpods[0].Status.PodIP
+		results.Direct.Retries, results.Direct.Throughput, results.Direct.ThroughputUnit, err = runIperfTest(ctx, clients, &testpods[1], podIP, perfCfg.TestPort, testDuration)
+		if err != nil {
+			log.WithError(err).Error("error hit running pod-pod iperf test")
+			return &results, err
+		}
 	}
 
-	svcname := fmt.Sprintf("iperf-srv-%s", utils.SanitizeString(testpods[0].Spec.NodeName))
-
-	svc, err := clients.Clientset.CoreV1().Services(namespace).Get(ctx, svcname, metav1.GetOptions{})
-	if err != nil {
-		log.WithError(err).Errorf("failed to list services in ns %s", namespace)
-		return &results, err
+	if perfCfg.Service {
+		log.Info("Running pod-svc-pod iperf test")
+		svcname := fmt.Sprintf("iperf-srv-%s", utils.SanitizeString(testpods[0].Spec.NodeName))
+		svc, err := clients.Clientset.CoreV1().Services(namespace).Get(ctx, svcname, metav1.GetOptions{})
+		if err != nil {
+			log.WithError(err).Errorf("failed to list services in ns %s", namespace)
+			return &results, err
+		}
+		svcIP := svc.Spec.ClusterIP
+		results.Service.Retries, results.Service.Throughput, results.Service.ThroughputUnit, err = runIperfTest(ctx, clients, &testpods[1], svcIP, perfCfg.TestPort, testDuration)
+		if err != nil {
+			log.WithError(err).Error("error hit running pod-svc-pod iperf test")
+			return &results, err
+		}
 	}
-
-	svcIP := svc.Spec.ClusterIP
-	results.Service.Retries, results.Service.Throughput, results.Service.ThroughputUnit, err = runIperfTest(ctx, clients, &testpods[1], svcIP, testDuration)
-	if err != nil {
-		log.WithError(err).Warning("Error hit running pod-svc-pod iperf test")
-		return &results, err
+	if perfCfg.External {
+		log.Info("Running ext-svc-pod iperf test")
+		results.External.Retries, results.External.Throughput, results.External.ThroughputUnit, err = runIperfTest(ctx, clients, nil, perfCfg.ExternalIPOrFQDN, perfCfg.TestPort, testDuration)
+		if err != nil {
+			log.WithError(err).Error("error hit running external-svc-pod iperf test")
+			return &results, err
+		}
 	}
-
 	return &results, nil
 }
 
 // RunIperfTest starts the iperf test
-func runIperfTest(ctx context.Context, clients config.Clients, srcPod *corev1.Pod, targetIP string, testDuration int) (int, float64, string, error) {
+func runIperfTest(ctx context.Context, clients config.Clients, srcPod *corev1.Pod, targetIP string, port int, testDuration int) (int, float64, string, error) {
 	log.Debug("Entering runIperfTest function")
 
-	cmd := fmt.Sprintf("iperf3 -c %s -P 8 -J -t %d", targetIP, testDuration)
-	stdout, _, err := utils.RetryinPod(ctx, clients, srcPod, cmd, testDuration+30)
-	if err != nil {
-		return 0, 0, "", fmt.Errorf("failed to run iperf command")
+	cmd := fmt.Sprintf("iperf3 -c %s -P 8 -J -t %d -p %d", targetIP, testDuration, port)
+	var stdout string
+	var stderr string
+	var err error
+	if srcPod != nil {
+		stdout, stderr, err = utils.RetryinPod(ctx, clients, srcPod, cmd, testDuration+30)
+		log.Debug("stdout: ", stdout)
+		log.Debug("stderr: ", stderr)
+		if err != nil {
+			return 0, 0, "", fmt.Errorf("failed to run iperf command")
+		}
+	} else {
+		// srcPod is nil, so we're running the test from this host
+		stdout, stderr, err = utils.Shellout(cmd, 5) //  retry a few times, since one is unreliable
+		log.Debug("stdout: ", stdout)
+		log.Debug("stderr: ", stderr)
+		if err != nil {
+			return 0, 0, "", fmt.Errorf("%s", stderr)
+		}
 	}
-	return parseIperfOutput(stdout)
+	retransmits, throughput, unit, err := parseIperfOutput(stdout)
+	log.Infof("retransmits: %d throughput: %.1f, unit: %s", retransmits, throughput, unit)
+	return retransmits, throughput, unit, err
 }
 
 // DeployIperfPods deploys iperf pods and services
-func DeployIperfPods(ctx context.Context, clients config.Clients, namespace string, hostnet bool, image string) error {
+func DeployIperfPods(ctx context.Context, clients config.Clients, namespace string, hostnet bool, image string, port int) error {
 	log.Debug("Entering deployIperfPods function")
 	// get node names
 	nodelist := &corev1.NodeList{}
 	err := clients.CtrlClient.List(ctx, nodelist)
 	if err != nil {
-		return fmt.Errorf("failed to list nodes")
+		return fmt.Errorf("failed to list nodes: %w", err)
 	}
 	for _, node := range nodelist.Items {
 		if node.Labels["tigera.io/test-nodepool"] == "default-pool" {
 			// deploy server pods
 			nodename := node.ObjectMeta.Name
-			log.Infof("found nodename: %s", nodename)
+			log.Debugf("found nodename: %s", nodename)
 			podname := fmt.Sprintf("iperf-srv-%s", nodename)
-			pod := makePod(nodename, namespace, podname, hostnet, image, "iperf3 -s")
+			cmd := fmt.Sprintf("iperf3 -s -p %d", port)
+			pod := makePod(nodename, namespace, podname, hostnet, image, cmd)
 			_, err = utils.GetOrCreatePod(ctx, clients, pod)
 			if err != nil {
-				log.WithError(err).Error("error making qperf pod")
+				log.WithError(err).Error("error making iperf pod")
 				return err
 			}
 			// We're creating a service per pod, so that we can select the node we run the test between.
-			svc := makeSvc(namespace, podname)
+			svc := makeSvc(namespace, podname, port)
 			_, err = utils.GetOrCreateSvc(ctx, clients, svc)
 			if err != nil {
-				log.WithError(err).Error("error making qperf svc")
+				log.WithError(err).Error("error making iperf svc")
 				return err
 			}
 		}
 	}
 	return nil
-}
-
-// CreateTestPolicy creates a policy to allow iperf test traffic on port 5201
-func CreateTestPolicy(ctx context.Context, clients config.Clients, policyName string, testNamespace string) error {
-	log.Debug("Entering createTestPolicy function")
-	return policy.CreateTestPolicy(ctx, clients, policyName, testNamespace, []int{5201})
 }
 
 func parseIperfOutput(stdout string) (int, float64, string, error) {
@@ -310,14 +338,14 @@ func makePod(nodename string, namespace string, podname string, hostnetwork bool
 				},
 			},
 			NodeName:      nodename,
-			RestartPolicy: "Never",
+			RestartPolicy: "OnFailure",
 			HostNetwork:   hostnetwork,
 		},
 	}
 	return pod
 }
 
-func makeSvc(namespace string, podname string) corev1.Service {
+func makeSvc(namespace string, podname string, port int) corev1.Service {
 	podname = utils.SanitizeString(podname)
 	svc := corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
@@ -335,7 +363,7 @@ func makeSvc(namespace string, podname string) corev1.Service {
 			},
 			Ports: []corev1.ServicePort{
 				{
-					Port: 5201,
+					Port: int32(port),
 				},
 			},
 		},
@@ -350,50 +378,83 @@ func SummarizeResults(results []*Results) (*ResultSummary, error) {
 	var directThroughputs []float64
 	var serviceRetries []float64
 	var serviceThroughputs []float64
+	var externalRetries []float64
+	var externalThroughputs []float64
 
 	for _, result := range results {
-		directRetries = append(directRetries, float64(result.Direct.Retries))
-		if result.Direct.ThroughputUnit != "Mbits/sec" {
-			log.Errorf("unknown direct throughput unit: %s", result.Direct.ThroughputUnit)
-			return &resultSummary, fmt.Errorf("unknown direct throughput unit: %s", result.Direct.ThroughputUnit)
+		if result.Direct.Retries != 0 || result.Direct.Throughput != 0 || result.Direct.ThroughputUnit != "" {
+			directRetries = append(directRetries, float64(result.Direct.Retries))
+			if result.Direct.ThroughputUnit != "Mbits/sec" {
+				log.Errorf("unknown direct throughput unit: %s", result.Direct.ThroughputUnit)
+				return &resultSummary, fmt.Errorf("unknown direct throughput unit: %s", result.Direct.ThroughputUnit)
+			}
+			directThroughputs = append(directThroughputs, result.Direct.Throughput)
 		}
-		directThroughputs = append(directThroughputs, result.Direct.Throughput)
-
-		serviceRetries = append(serviceRetries, float64(result.Service.Retries))
-
-		if result.Service.ThroughputUnit != "Mbits/sec" {
-			log.Errorf("unknown service throughput unit: %s", result.Service.ThroughputUnit)
-			return &resultSummary, fmt.Errorf("unknown service throughput unit: %s", result.Service.ThroughputUnit)
+		if result.Service.Retries != 0 || result.Service.Throughput != 0 || result.Service.ThroughputUnit != "" {
+			serviceRetries = append(serviceRetries, float64(result.Service.Retries))
+			if result.Service.ThroughputUnit != "Mbits/sec" {
+				log.Errorf("unknown service throughput unit: %s", result.Service.ThroughputUnit)
+				return &resultSummary, fmt.Errorf("unknown service throughput unit: %s", result.Service.ThroughputUnit)
+			}
+			serviceThroughputs = append(serviceThroughputs, result.Service.Throughput)
 		}
-		serviceThroughputs = append(serviceThroughputs, result.Service.Throughput)
+		if result.External.Retries != 0 || result.External.Throughput != 0 || result.External.ThroughputUnit != "" {
+			externalRetries = append(externalRetries, float64(result.External.Retries))
+			if result.External.ThroughputUnit != "Mbits/sec" {
+				log.Errorf("unknown external throughput unit: %s", result.External.ThroughputUnit)
+				return &resultSummary, fmt.Errorf("unknown external throughput unit: %s", result.External.ThroughputUnit)
+			}
+			externalThroughputs = append(externalThroughputs, result.External.Throughput)
+		}
 	}
-
 	var err error
-	resultSummary.Retries.Direct, err = stats.SummarizeResults(directRetries)
-	if err != nil {
-		log.Warning("failed to summarize direct retries")
-		return &resultSummary, err
+	if len(directThroughputs) > 0 {
+		resultSummary.Throughput.Direct.Unit = "Mb/sec"
+		resultSummary.Retries.Direct, err = stats.SummarizeResults(directRetries)
+		if err != nil {
+			log.Warning("failed to summarize direct retries")
+			return &resultSummary, err
+		}
+		resultSummary.Retries.Direct.Unit = "none"
+		resultSummary.Throughput.Direct, err = stats.SummarizeResults(directThroughputs)
+		if err != nil {
+			log.Warning("failed to summarize direct throughput")
+			return &resultSummary, err
+		}
 	}
-	resultSummary.Retries.Direct.Unit = "none"
-	resultSummary.Throughput.Direct, err = stats.SummarizeResults(directThroughputs)
-	if err != nil {
-		log.Warning("failed to summarize direct throughput")
-		return &resultSummary, err
-	}
-	resultSummary.Throughput.Direct.Unit = "Mb/sec"
-	resultSummary.Retries.Service, err = stats.SummarizeResults(serviceRetries)
-	if err != nil {
-		log.Warning("failed to summarize service retries")
-		return &resultSummary, err
+	if len(serviceThroughputs) > 0 {
+		resultSummary.Throughput.Service.Unit = "Mb/sec"
+		resultSummary.Retries.Service, err = stats.SummarizeResults(serviceRetries)
+		if err != nil {
+			log.Warning("failed to summarize service retries")
+			return &resultSummary, err
+		}
 
-	}
-	resultSummary.Retries.Service.Unit = "none"
-	resultSummary.Throughput.Service, err = stats.SummarizeResults(serviceThroughputs)
-	if err != nil {
-		log.Warning("failed to summarize service throughput")
-		return &resultSummary, err
+		resultSummary.Retries.Service.Unit = "none"
+		resultSummary.Throughput.Service, err = stats.SummarizeResults(serviceThroughputs)
+		if err != nil {
+			log.Warning("failed to summarize service throughput")
+			return &resultSummary, err
 
+		}
+		resultSummary.Throughput.Service.Unit = "Mb/sec"
 	}
-	resultSummary.Throughput.Service.Unit = "Mb/sec"
+	if len(externalThroughputs) > 0 {
+		resultSummary.Throughput.External.Unit = "Mb/sec"
+		resultSummary.Retries.External, err = stats.SummarizeResults(externalRetries)
+		if err != nil {
+			log.Warning("failed to summarize external retries")
+			return &resultSummary, err
+		}
+
+		resultSummary.Retries.External.Unit = "none"
+		resultSummary.Throughput.External, err = stats.SummarizeResults(externalThroughputs)
+		if err != nil {
+			log.Warning("failed to summarize external throughput")
+			return &resultSummary, err
+
+		}
+		resultSummary.Throughput.External.Unit = "Mb/sec"
+	}
 	return &resultSummary, nil
 }

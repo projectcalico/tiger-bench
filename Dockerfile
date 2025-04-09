@@ -20,6 +20,8 @@ RUN apk add --update ca-certificates gettext && \
     chmod +x /usr/local/bin/aws-iam-authenticator
 RUN apk add --no-cache aws-cli
 
+RUN apk add --no-cache iperf3 curl
+RUN apk add --no-cache --repository http://dl-3.alpinelinux.org/alpine/edge/testing/ qperf
 COPY --from=builder /results /results
 COPY --from=builder /benchmark/benchmark /benchmark
 ENV KUBECONFIG="/kubeconfig"

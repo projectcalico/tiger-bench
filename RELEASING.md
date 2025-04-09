@@ -1,4 +1,4 @@
-# How to make a release
+# How to make a minor release
 
 Here are the steps used to make the v0.1.0 release, as an example to build on (or automate away) for the future.
 
