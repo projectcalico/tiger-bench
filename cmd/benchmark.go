@@ -139,7 +139,7 @@ func main() {
 			log.Fatal("test type unknown")
 		}
 		if !testConfig.LeaveStandingConfig {
-			// Clean up all the resources we might have created, apart from the namespace, which might have
+			// Clean up all the resources we might have created, apart from the namespace, which might have external service config in it
 			err = utils.DeleteDeployment(ctx, clients, testConfig.TestNamespace, "standing-deployment")
 			if err != nil {
 				log.WithError(err).Fatal("failed to delete standing-deployment")
