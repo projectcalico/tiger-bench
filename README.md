@@ -95,8 +95,8 @@ A list of test run definitions are provided as [`testconfig.yaml`](testconfig.ya
     direct: true
     service: true
     external: true
-    ControlPort: 32000,
-    TestPort: 32221,
+    ControlPort: 32000
+    TestPort: 32221
     ExternalIPOrFQDN: "a6c519e4e9d5a46d795e0d41bf82e93f-1429478103.us-west-2.elb.amazonaws.com"
 - testKind: thruput-latency
   numPolicies: 20
