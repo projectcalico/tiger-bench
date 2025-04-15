@@ -87,9 +87,9 @@ func ExecCommandInPod(ctx context.Context, pod *corev1.Pod, command string, time
 	return buf.String(), errBuf.String(), nil
 }
 
-// DeletePods deletes pods
-func DeletePods(ctx context.Context, clients config.Clients, namespace string, label string) error {
-	log.Debug("Entering DeletePods function")
+// DeletePodsWithLabel deletes pods with a particular label
+func DeletePodsWithLabel(ctx context.Context, clients config.Clients, namespace string, label string) error {
+	log.Debug("Entering DeletePodsWithLabel function")
 	listopts := metav1.ListOptions{
 		LabelSelector: label,
 		FieldSelector: "metadata.namespace=" + namespace,
@@ -188,9 +188,9 @@ func GetOrCreateSvc(ctx context.Context, clients config.Clients, svc corev1.Serv
 	return svc, nil
 }
 
-// DeleteServices deletes services starting with a prefix
-func DeleteServices(ctx context.Context, clients config.Clients, namespace string, serviceNamePrefix string) error {
-	log.Debug("Entering DeleteServices function")
+// DeleteServicesWithPrefix deletes services starting with a prefix
+func DeleteServicesWithPrefix(ctx context.Context, clients config.Clients, namespace string, serviceNamePrefix string) error {
+	log.Debug("Entering DeleteServicesWithPrefix function")
 	svcs := corev1.ServiceList{}
 	err := clients.CtrlClient.List(ctx, &svcs, ctrlclient.InNamespace(namespace))
 	if err != nil {

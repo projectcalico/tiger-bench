@@ -148,23 +148,23 @@ func main() {
 			if err != nil {
 				log.WithError(err).Fatal("failed to delete standing-svc")
 			}
-			err = utils.DeleteServices(ctx, clients, testConfig.TestNamespace, "standing-svc")
+			err = utils.DeleteServicesWithPrefix(ctx, clients, testConfig.TestNamespace, "standing-svc")
 			if err != nil {
 				log.WithError(err).Fatal("failed to delete standing-svc")
 			}
-			err = utils.DeleteServices(ctx, clients, testConfig.TestNamespace, "iperf-srv")
+			err = utils.DeleteServicesWithPrefix(ctx, clients, testConfig.TestNamespace, "iperf-srv")
 			if err != nil {
 				log.WithError(err).Fatal("failed to delete iperf-srv")
 			}
-			err = utils.DeleteServices(ctx, clients, testConfig.TestNamespace, "qperf-srv")
+			err = utils.DeleteServicesWithPrefix(ctx, clients, testConfig.TestNamespace, "qperf-srv")
 			if err != nil {
 				log.WithError(err).Fatal("failed to delete qperf-srv")
 			}
-			err = utils.DeletePods(ctx, clients, testConfig.TestNamespace, "app=iperf")
+			err = utils.DeletePodsWithLabel(ctx, clients, testConfig.TestNamespace, "app=iperf")
 			if err != nil {
 				log.WithError(err).Fatal("failed to delete iperf pods")
 			}
-			err = utils.DeletePods(ctx, clients, testConfig.TestNamespace, "app=qperf")
+			err = utils.DeletePodsWithLabel(ctx, clients, testConfig.TestNamespace, "app=qperf")
 			if err != nil {
 				log.WithError(err).Fatal("failed to delete qperf pods")
 			}
