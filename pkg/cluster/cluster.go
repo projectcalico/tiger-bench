@@ -183,8 +183,8 @@ func SetCalicoNodeCPULimit(ctx context.Context, clients config.Clients, limit st
 		return err
 	}
 
-	// delete all calico-node pods so they all restart in parallel, since this is going to be slow
-	err = utils.DeletePods(ctx, clients, "calico-system", "k8s-app=calico-node")
+	// delete all calico-node pods so they all restart in parallel, since this is going to be slow if they update one-by-one
+	err = utils.DeletePodsWithLabel(ctx, clients, "calico-system", "k8s-app=calico-node")
 	if err != nil {
 		log.Warning("failed to delete calico-node pods")
 		// we're not going to return an error here, since the pods will eventually restart, just slower
