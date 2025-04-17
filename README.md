@@ -12,9 +12,9 @@ It also provides a framework for us to extend later with other tests.
    `docker pull <image>`, `docker tag <private-image-name>`, `docker push <private-image-name>`
 
    The images are:
-   `quay.io/tigeradev/tiger-bench-nginx:latest`
-   `quay.io/tigeradev/tiger-bench-perf:latest`
-   `quay.io/tigeradev/tiger-bench:latest` - this is the tool itself.
+   `quay.io/tigeradev/tiger-bench-nginx:v0.2.0`
+   `quay.io/tigeradev/tiger-bench-perf:v0.2.0`
+   `quay.io/tigeradev/tiger-bench:v0.2.0` - this is the tool itself.
 
 1. Create a `testconfig.yaml` file, containing a list of test definitions you'd like to run (see example provided)
 1. Run the tool, substituting the image names in the command below if needed, and modifying the test parameters if desired:
@@ -28,9 +28,9 @@ It also provides a framework for us to extend later with other tests.
    -e AWS_ACCESS_KEY_ID \
    -e AWS_SESSION_TOKEN \
    -e LOG_LEVEL=INFO \
-   -e WEBSERVER_IMAGE="quay.io/tigeradev/tiger-bench-nginx:latest" \
-   -e PERF_IMAGE="quay.io/tigeradev/tiger-bench-perf:latest" \
-   quay.io/tigeradev/tiger-bench:latest
+   -e WEBSERVER_IMAGE="quay.io/tigeradev/tiger-bench-nginx:v0.2.0" \
+   -e PERF_IMAGE="quay.io/tigeradev/tiger-bench-perf:v0.2.0" \
+   quay.io/tigeradev/tiger-bench:v0.2.0
    ```
 1. See results in the `results.json` file in your local directory!
 
@@ -63,9 +63,9 @@ docker run --rm --net=host \
 -v $HOME/.aws:/root/.aws \
 -e AWS_SECRET_ACCESS_KEY \
 -e AWS_ACCESS_KEY_ID \
--e WEBSERVER_IMAGE="quay.io/tigeradev/tiger-bench-nginx:latest" \
--e PERF_IMAGE="quay.io/tigeradev/tiger-bench-perf:latest" \
-quay.io/tigeradev/tiger-bench:latest
+-e WEBSERVER_IMAGE="quay.io/tigeradev/tiger-bench-nginx:v0.2.0" \
+-e PERF_IMAGE="quay.io/tigeradev/tiger-bench-perf:v0.2.0" \
+quay.io/tigeradev/tiger-bench:v0.2.0
 ```
 
 The tool runs in the hosts network namespace to ensure it has the same access as a user running kubectl on the host.
@@ -137,11 +137,11 @@ external: false
 `direct` is a boolean, which determines whether the test should run a direct pod-to-pod test.
 `service` is a boolean, which determines whether the test should run a pod-to-service-to-pod test.
 `external` is a boolean, which determines whether the test should run a test from whereever this test is being run to an externally exposed service.
-If `external=true`, you must also supply `ExternalIPOrFQDN`, `TestPort` and `ControlPort` (for a thruput-latency test) to tell the test the IP and ports it should connect to. The ExternalIPOrFQDN will be whatever is exposed to the world, and might be a LoadBalancer IP, or a node IP, or something else, depending on how you exposed the service.  The Test and Control ports need to be the same as used on the test server pod (because the test tools were not designed to work in an environment with NAT).
+If `external=true`, you must also supply `ExternalIPOrFQDN`, `TestPort` and `ControlPort` (for a thruput-latency test) to tell the test the IP and ports it should connect to. The ExternalIPOrFQDN will be whatever is exposed to the world, and might be a LoadBalancer IP, or a node IP, or something else, depending on how you exposed the service. The Test and Control ports need to be the same as used on the test server pod (because the test tools were not designed to work in an environment with NAT).
 
-Note that the tool will NOT expose the services for you, because there are too many different ways to expose services to the world. You will need to expose pods with the label `app: qperf` in the test namespace to the world for this test to work. An example of exposing these pods using NodePorts can be found in `external_service_example.yaml`.  If you wanted to change that to use a LoadBalancer, simply change `type: NodePort` to `type: LoadBalancer`.
+Note that the tool will NOT expose the services for you, because there are too many different ways to expose services to the world. You will need to expose pods with the label `app: qperf` in the test namespace to the world for this test to work. An example of exposing these pods using NodePorts can be found in `external_service_example.yaml`. If you wanted to change that to use a LoadBalancer, simply change `type: NodePort` to `type: LoadBalancer`.
 
-For `thruput-latency` tests, you will need to expose 2 ports from those pods: A TCP `TestPort` and a `ControlPort`. You must not map the port numbers between the pod and the external service, but they do NOT need to be consecutive.  i.e. if you specify TestPort=32221, the pod will listen on port 32221 and whatever method you use to expose that service to the outside world must also use that port number.
+For `thruput-latency` tests, you will need to expose 2 ports from those pods: A TCP `TestPort` and a `ControlPort`. You must not map the port numbers between the pod and the external service, but they do NOT need to be consecutive. i.e. if you specify TestPort=32221, the pod will listen on port 32221 and whatever method you use to expose that service to the outside world must also use that port number.
 
 ### Settings which can reconfigure your cluster
 
