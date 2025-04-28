@@ -100,6 +100,7 @@ type DataPlane string
 const (
 	DataPlaneIPTables DataPlane = "iptables"
 	DataPlaneBPF      DataPlane = "bpf"
+	DataPlaneNftables DataPlane = "nftables"
 	DataPlaneUnset    DataPlane = ""
 )
 
@@ -135,11 +136,11 @@ type TestConfig struct {
 
 // PerfConfig details which tests to run in thruput-latency and iperf tests.
 type PerfConfig struct {
-	Direct          bool   // Whether to do a direct pod-pod test
-	Service         bool   // Whether to do a pod-service-pod test
-	External        bool   // Whether to test from this container to the external IP for an external-service-pod test
-	ControlPort     int    // The port to use for the control connection in tests.  Used by qperf tests.
-	TestPort        int    // The port to use for the test connection in tests.  Used by qperf and iperf tests
+	Direct           bool   // Whether to do a direct pod-pod test
+	Service          bool   // Whether to do a pod-service-pod test
+	External         bool   // Whether to test from this container to the external IP for an external-service-pod test
+	ControlPort      int    // The port to use for the control connection in tests.  Used by qperf tests.
+	TestPort         int    // The port to use for the test connection in tests.  Used by qperf and iperf tests
 	ExternalIPOrFQDN string // The external IP or DNS name to connect to for an external-service-pod test
 }
 
@@ -243,7 +244,7 @@ func defaultAndValidate(cfg *Config) error {
 		}
 		if tcfg.TestKind == "thruput-latency" || tcfg.TestKind == "iperf" {
 			if tcfg.Perf == nil {
-				tcfg.Perf = &PerfConfig{true, true, false, 32000, 0, ""}  // Default so that old configs don't break
+				tcfg.Perf = &PerfConfig{true, true, false, 32000, 0, ""} // Default so that old configs don't break
 				continue
 			}
 			if tcfg.Perf.External {

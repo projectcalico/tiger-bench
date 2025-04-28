@@ -30,7 +30,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	v3 "github.com/tigera/api/pkg/apis/projectcalico/v3"
 	operatorv1 "github.com/tigera/operator/api/v1"
-	v1 "github.com/tigera/operator/api/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -54,6 +53,11 @@ func ConfigureCluster(ctx context.Context, cfg config.Config, clients config.Cli
 		err = enableIptables(ctx, clients)
 		if err != nil {
 			return fmt.Errorf("failed to enable iptables")
+		}
+	} else if testConfig.Dataplane == config.DataPlaneNftables {
+		err = enableNftables(ctx, clients)
+		if err != nil {
+			return fmt.Errorf("failed to enable Nftables")
 		}
 	} else if testConfig.Dataplane == config.DataPlaneUnset {
 		log.Info("No dataplane specified, using whatever is already set")
@@ -157,11 +161,11 @@ func SetCalicoNodeCPULimit(ctx context.Context, clients config.Clients, limit st
 	if limit == "0" {
 		installation.Spec.CalicoNodeDaemonSet = nil
 	} else {
-		installation.Spec.CalicoNodeDaemonSet = &v1.CalicoNodeDaemonSet{
-			Spec: &v1.CalicoNodeDaemonSetSpec{
-				Template: &v1.CalicoNodeDaemonSetPodTemplateSpec{
-					Spec: &v1.CalicoNodeDaemonSetPodSpec{
-						Containers: []v1.CalicoNodeDaemonSetContainer{
+		installation.Spec.CalicoNodeDaemonSet = &operatorv1.CalicoNodeDaemonSet{
+			Spec: &operatorv1.CalicoNodeDaemonSetSpec{
+				Template: &operatorv1.CalicoNodeDaemonSetPodTemplateSpec{
+					Spec: &operatorv1.CalicoNodeDaemonSetPodSpec{
+						Containers: []operatorv1.CalicoNodeDaemonSetContainer{
 							{
 								Name: "calico-node",
 								Resources: &corev1.ResourceRequirements{
