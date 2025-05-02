@@ -20,12 +20,12 @@ jobs:
         run: go mod download
       - name: Build
         run: go build -v ./...
-      - name: Test
-        run: go test -v ./...
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
           version: v1.60
+      - name: Test
+        run: go test -v ./...
   deploy:
     needs: test
     if: ${{ success() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-') || startsWith(github.ref, 'refs/tags/v')) }}
@@ -38,6 +38,8 @@ jobs:
             image: quay.io/tigeradev/tiger-bench-perf
           - dockerfile: ./images/nginx/Dockerfile
             image: quay.io/tigeradev/tiger-bench-nginx
+          - dockerfile: ./images/ttfr/Dockerfile
+            image: quay.io/tigeradev/tiger-bench-ttfr
           - dockerfile: ./Dockerfile
             image: quay.io/tigeradev/tiger-bench
     permissions:
