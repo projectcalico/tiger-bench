@@ -79,7 +79,7 @@ func (t *HTTPTarget) Ping() error {
 		method = http.MethodHead
 		url = t.url
 	case "http":
-		// randomly generate method, status for the request with equal likely hood for all status listed
+		// randomly generate method, status for the request with equal likelihood for all status listed
 		method = httpRequestMethods[rand.Intn(len(httpRequestMethods))]
 		status := httpStatusCodes[rand.Intn(len(httpStatusCodes))]
 		// creates a distribution for user agents, %d = 5 more likely than %d = 1
