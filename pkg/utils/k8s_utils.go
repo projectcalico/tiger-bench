@@ -409,3 +409,23 @@ func ScaleDeployment(ctx context.Context, clients config.Clients, deployment app
 	}
 	return nil
 }
+
+// GetPodLogs retrieves logs from a pod
+func GetPodLogs(ctx context.Context, clients config.Clients, podName string, namespace string) (string, error) {
+	log.Debug("Entering GetPodLogs function")
+	podLogOpts := corev1.PodLogOptions{}
+	req := clients.Clientset.CoreV1().Pods(namespace).GetLogs(podName, &podLogOpts)
+	logs, err := req.Stream(ctx)
+	if err != nil {
+		log.WithError(err).Error("failed to get pod logs")
+		return "", err
+	}
+	defer logs.Close()
+	buf := new(bytes.Buffer)
+	_, err = buf.ReadFrom(logs)
+	if err != nil {
+		log.WithError(err).Error("failed to read pod logs")
+		return "", err
+	}
+	return buf.String(), nil
+}

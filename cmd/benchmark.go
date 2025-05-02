@@ -33,6 +33,7 @@ import (
 	"github.com/projectcalico/tiger-bench/pkg/policy"
 	"github.com/projectcalico/tiger-bench/pkg/qperf"
 	"github.com/projectcalico/tiger-bench/pkg/results"
+	"github.com/projectcalico/tiger-bench/pkg/ttfr"
 	"github.com/projectcalico/tiger-bench/pkg/utils"
 )
 
@@ -135,6 +136,28 @@ func main() {
 				log.WithError(err).Error("failed to run dnsperf tests")
 			}
 			log.Infof("dnsperf results: %v", thisResult.DNSPerf)
+		case config.TestKindTTFR:
+			var ttfrResultsList []*ttfr.Results
+			// Apply standing policy (that applies to both server and test pods)
+			err := policy.CreateTestPolicy(ctx, clients, testPolicyName, testConfig.TestNamespace, []int{8080})
+			if err != nil {
+				log.WithError(err).Fatal("failed to create ttfr test policy")
+			}
+			log.Info("Running ttfr tests, Iterations=", testConfig.Iterations)
+			for j := 0; j < testConfig.Iterations; j++ {
+				ttfrResult, err := ttfr.RunTTFRTest(ctx, clients, testConfig, cfg)
+				if err != nil {
+					log.WithError(err).Error("failed to get ttfr results")
+					continue
+				}
+				ttfrResultsList = append(ttfrResultsList, &ttfrResult)
+			}
+			if len(ttfrResultsList) > 0 {
+				thisResult.TTFR, err = ttfr.SummarizeResults(ttfrResultsList)
+				if err != nil {
+					log.WithError(err).Error("failed to summarize ttfr results")
+				}
+			}
 		default:
 			log.Fatal("test type unknown")
 		}

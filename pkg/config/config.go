@@ -59,7 +59,7 @@ type Config struct {
 	LogLevel        string `envconfig:"LOG_LEVEL" default:"info"`
 	WebServerImage  string `envconfig:"WEBSERVER_IMAGE" default:"quay.io/tigeradev/tiger-bench-nginx:latest"`
 	PerfImage       string `envconfig:"PERF_IMAGE" default:"quay.io/tigeradev/tiger-bench-perf:latest"`
-	TTFRImage       string `envconfig:"TTFR_IMAGE" default:"quay.io/tigeradev/ttfr:latest"`
+	TTFRImage       string `envconfig:"TTFR_IMAGE" default:"quay.io/tigeradev/tiger-bench-ttfr:latest"`
 	TestConfigs     testConfigs
 }
 
@@ -80,6 +80,7 @@ const (
 	TestKindDNSPerf TestKind = "dnsperf"
 	TestKindIperf   TestKind = "iperf"
 	TestKindQperf   TestKind = "thruput-latency"
+	TestKindTTFR    TestKind = "ttfr"
 )
 
 // Encap represents the encapsulation type to use.
@@ -117,7 +118,7 @@ const (
 
 // TestConfig represents a test to run on a cluster, and the configuration for the test.
 type TestConfig struct {
-	TestKind            TestKind  `validate:"required,oneof=dnsperf iperf thruput-latency"`
+	TestKind            TestKind  `validate:"required,oneof=dnsperf iperf thruput-latency ttfr"`
 	Encap               Encap     `validate:"omitempty,oneof=none vxlan ipip"`
 	Dataplane           DataPlane `validate:"omitempty,oneof=iptables bpf"`
 	NumPolicies         int       `validate:"gte=0"`
@@ -129,17 +130,18 @@ type TestConfig struct {
 	Duration            int         `default:"60"`
 	DNSPerf             *DNSConfig  `validate:"required_if=TestKind dnsperf"`
 	Perf                *PerfConfig `validate:"required_if=TestType thruput-latency,required_if=TestType iperf"`
+	TTFRConfig          *TTFRConfig `validate:"required_if=TestType ttfr"`
 	CalicoNodeCPULimit  string
 	LeaveStandingConfig bool
 }
 
 // PerfConfig details which tests to run in thruput-latency and iperf tests.
 type PerfConfig struct {
-	Direct          bool   // Whether to do a direct pod-pod test
-	Service         bool   // Whether to do a pod-service-pod test
-	External        bool   // Whether to test from this container to the external IP for an external-service-pod test
-	ControlPort     int    // The port to use for the control connection in tests.  Used by qperf tests.
-	TestPort        int    // The port to use for the test connection in tests.  Used by qperf and iperf tests
+	Direct           bool   // Whether to do a direct pod-pod test
+	Service          bool   // Whether to do a pod-service-pod test
+	External         bool   // Whether to test from this container to the external IP for an external-service-pod test
+	ControlPort      int    // The port to use for the control connection in tests.  Used by qperf tests.
+	TestPort         int    // The port to use for the test connection in tests.  Used by qperf and iperf tests
 	ExternalIPOrFQDN string // The external IP or DNS name to connect to for an external-service-pod test
 }
 
@@ -147,6 +149,13 @@ type PerfConfig struct {
 type DNSConfig struct {
 	NumDomains int         `validate:"gte=0"`
 	Mode       DNSPerfMode `validate:"omitempty,oneof=Inline NoDelay DelayDeniedPacket DelayDNSResponse"`
+}
+
+// TTFRConfig contains the configuration specific to TTFR tests.
+type TTFRConfig struct {
+	TestDuration    int `validate:"gte=0"`
+	TestPodsPerNode int `validate:"gte=0"`
+	Rate            int `validate:"gte=0"`
 }
 
 // New returns a new instance of Config.
@@ -243,7 +252,7 @@ func defaultAndValidate(cfg *Config) error {
 		}
 		if tcfg.TestKind == "thruput-latency" || tcfg.TestKind == "iperf" {
 			if tcfg.Perf == nil {
-				tcfg.Perf = &PerfConfig{true, true, false, 32000, 0, ""}  // Default so that old configs don't break
+				tcfg.Perf = &PerfConfig{true, true, false, 32000, 0, ""} // Default so that old configs don't break
 				continue
 			}
 			if tcfg.Perf.External {

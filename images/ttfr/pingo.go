@@ -453,13 +453,13 @@ func main() {
 		}, 10*time.Second, quitAfter)
 	} else {
 		gather, err := registry.Gather()
+		if err != nil {
+			log.Fatal("error gathering metrics: ", err)
+		}
 		for _, metric := range gather {
 			if *metric.Name == "ttfr_seconds" {
 				log.Info(`{"ttfr_seconds": `, *metric.Metric[0].Gauge.Value, "}")
 			}
-		}
-		if err != nil {
-			log.Fatal("error gathering metrics: ", err)
 		}
 	}
 }
@@ -471,3 +471,6 @@ func randString(n int) string {
 	}
 	return string(b)
 }
+
+
+// kubectl debug -it ephemeral-demo --image=busybox:1.28 --target=ephemeral-demo
