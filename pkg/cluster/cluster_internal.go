@@ -77,7 +77,7 @@ func enableNftables(ctx context.Context, clients config.Clients) error {
 		return fmt.Errorf("kube-proxy mode is not nftables (found: %s)", mode)
 	}
 
-	// kubectl patch installation.operator.tigera.io default --type merge -p '{"spec":{"calicoNetwork":{"linuxDataplane":"Iptables"}}}'
+	// kubectl patch installation.operator.tigera.io default --type merge -p '{"spec":{"calicoNetwork":{"linuxDataplane":"Nftables"}}}'
 	patch := []byte(`{"spec":{"calicoNetwork":{"linuxDataplane":"Nftables"}}}`)
 
 	installation = &operatorv1.Installation{}
@@ -88,6 +88,24 @@ func enableNftables(ctx context.Context, clients config.Clients) error {
 	}
 	log.Debugf("patching with %v", string(patch[:]))
 	log.Info("enabling Nftables dataplane")
+	err = clients.CtrlClient.Patch(childCtx, installation, ctrlclient.RawPatch(ctrlclient.Merge.Type(), patch))
+	if err != nil {
+		return fmt.Errorf("failed to patch installation")
+	}
+
+	// Nftables bug ?
+	// kubectl patch installation.operator.tigera.io default --type merge -p '{"spec":{"calicoNetwork":{"linuxPolicySetupTimeoutSeconds":null}}}'
+	time.Sleep(1000 * time.Millisecond)
+	patch = []byte(`{"spec":{"calicoNetwork":{"linuxPolicySetupTimeoutSeconds":null}}}`)
+
+	installation = &operatorv1.Installation{}
+	log.Debug("Getting installation to patch linuxPolicySetupTimeoutSeconds")
+	err = clients.CtrlClient.Get(childCtx, ctrlclient.ObjectKey{Name: "default"}, installation)
+	if err != nil {
+		return fmt.Errorf("failed to get installation")
+	}
+	log.Debugf("patching with %v", string(patch[:]))
+	log.Info("Making sure linuxPolicySetupTimeoutSeconds is Null")
 	err = clients.CtrlClient.Patch(childCtx, installation, ctrlclient.RawPatch(ctrlclient.Merge.Type(), patch))
 	if err != nil {
 		return fmt.Errorf("failed to patch installation")
