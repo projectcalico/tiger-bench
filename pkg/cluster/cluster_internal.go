@@ -54,6 +54,7 @@ func enableNftables(ctx context.Context, clients config.Clients) error {
 	// Is this cluster nftable ready?
 	kubecm := &corev1.ConfigMap{}
 	err = clients.CtrlClient.Get(childCtx, ctrlclient.ObjectKey{Namespace: "kube-system", Name: "kube-proxy"}, kubecm)
+	log.Debug("ٰVerifing if kube-proxy config is available")
 	if err != nil {
 		return fmt.Errorf("failed to get proxymode")
 	}
@@ -72,7 +73,7 @@ func enableNftables(ctx context.Context, clients config.Clients) error {
 	if !ok {
 		return fmt.Errorf("mode field not found or not a string")
 	}
-
+	log.Debug("ٰVerifing if kube-proxy is running in nftables mode")
 	if mode != "nftables" {
 		return fmt.Errorf("kube-proxy mode is not nftables (found: %s)", mode)
 	}
