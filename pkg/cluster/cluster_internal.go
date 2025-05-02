@@ -22,6 +22,7 @@ import (
 
 	"github.com/projectcalico/tiger-bench/pkg/config"
 	"github.com/projectcalico/tiger-bench/pkg/utils"
+	yaml "gopkg.in/yaml.v2"
 
 	"github.com/sethvargo/go-retry"
 	log "github.com/sirupsen/logrus"
@@ -48,6 +49,32 @@ func enableNftables(ctx context.Context, clients config.Clients) error {
 	if *installation.Spec.CalicoNetwork.LinuxDataplane == operatorv1.LinuxDataplaneNftables {
 		log.Info("Nftables already enabled")
 		return nil
+	}
+
+	// Is this cluster nftable ready?
+	kubecm := &corev1.ConfigMap{}
+	err = clients.CtrlClient.Get(childCtx, ctrlclient.ObjectKey{Namespace: "kube-system", Name: "kube-proxy"}, kubecm)
+	if err != nil {
+		return fmt.Errorf("failed to get proxymode")
+	}
+	configStr, ok := kubecm.Data["config.conf"]
+	if !ok {
+		return fmt.Errorf("config.conf not found in kube-proxy configmap")
+	}
+
+	var configMap map[string]interface{}
+	err = yaml.Unmarshal([]byte(configStr), &configMap)
+	if err != nil {
+		return fmt.Errorf("failed to parse YAML: %w", err)
+	}
+
+	mode, ok := configMap["mode"].(string)
+	if !ok {
+		return fmt.Errorf("mode field not found or not a string")
+	}
+
+	if mode != "nftables" {
+		return fmt.Errorf("kube-proxy mode is not nftables (found: %s)", mode)
 	}
 
 	// kubectl patch installation.operator.tigera.io default --type merge -p '{"spec":{"calicoNetwork":{"linuxDataplane":"Iptables"}}}'

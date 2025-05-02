@@ -13,6 +13,7 @@ require (
 	github.com/stretchr/testify v1.10.0
 	github.com/tigera/api v0.0.0-20240320170621-278e89a8c5fb
 	golang.org/x/mod v0.23.0
+	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/client-go v0.33.0
 	sigs.k8s.io/controller-runtime v0.20.4
 )

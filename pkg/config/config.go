@@ -120,7 +120,7 @@ const (
 type TestConfig struct {
 	TestKind            TestKind  `validate:"required,oneof=dnsperf iperf thruput-latency"`
 	Encap               Encap     `validate:"omitempty,oneof=none vxlan ipip"`
-	Dataplane           DataPlane `validate:"omitempty,oneof=iptables bpf"`
+	Dataplane           DataPlane `validate:"omitempty,oneof=iptables bpf nftables"`
 	NumPolicies         int       `validate:"gte=0"`
 	NumServices         int       `validate:"gte=0"`
 	NumPods             int       `validate:"gte=0"`
