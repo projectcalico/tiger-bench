@@ -28,7 +28,7 @@ jobs:
         run: go test -v ./...
   deploy:
     needs: test
-    if: ${{ success() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-') || startsWith(github.ref, 'refs/tags/v')) }}
+    if: ${{ success() }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
