@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/projectcalico/tiger-bench/pkg/config"
@@ -69,92 +71,194 @@ func RunTTFRTest(ctx context.Context, clients config.Clients, testconfig *config
 
 		//   Create a test pod deployment (of pingo pods), which will contact the server pod on the same node (we are testing control plane performance, not node-node latency)
 		depname := fmt.Sprintf("ttfr-test-%.2d", i)
-		dep := makeDeployment(node.ObjectMeta.Name, testconfig.TestNamespace, depname, testconfig.HostNetwork, cfg.TTFRImage, int32(testconfig.TTFRConfig.TestPodsPerNode), "http://"+podIP)
+		dep := makeDeployment(node.ObjectMeta.Name, testconfig.TestNamespace, depname, testconfig.HostNetwork, cfg.TTFRImage, int32(testconfig.TTFRConfig.TestPodsPerNode), podIP)
 		_, err = utils.GetOrCreateDeployment(ctx, clients, dep)
 		if err != nil {
 			log.WithError(err).Error("error making test deployment")
 			return ttfrResults, err
 		}
-		//   Wait for the test deployments to be ready
-		//  NOT WORKING YET
-		time.Sleep(5 * time.Second)
-		err = utils.WaitForDeployment(ctx, clients, dep)
+		//   Wait for the test deployment pods to be ready
+		_, err = utils.WaitForTestPods(ctx, clients, testconfig.TestNamespace, fmt.Sprintf("app=ttfr,pod=%s,node=%s", depname, node.ObjectMeta.Name))
 		if err != nil {
 			log.WithError(err).Error("error waiting for test deployment to be ready")
 			return ttfrResults, err
 		}
 	}
 	endtime := time.Now().Add(time.Duration(testconfig.TTFRConfig.TestDuration) * time.Second)
-	for n, node := range nodelist.Items {
-		// For each node in the cluster (with the test label):
-		if time.Now().After(endtime) {
-			log.Info("Test complete")
-			break
-		}
-		//   While we haven't timed out:
-		//     Get the list of running pods in the test deployment on this node
-		pods := &corev1.PodList{}
-		listOptions := &client.ListOptions{
-			Namespace: testconfig.TestNamespace,
-			LabelSelector: labels.SelectorFromSet(labels.Set{
-				"app":  "ttfr",
-				"pod":  fmt.Sprintf("ttfr-test-%.2d", n),
-				"node": node.ObjectMeta.Name,
-			}),
-		}
-		err = clients.CtrlClient.List(ctx, pods, listOptions)
-		if err != nil {
-			log.WithError(err).Error("error listing pods")
-			return ttfrResults, err
-		}
+	period := 1.0 / float64(testconfig.TTFRConfig.Rate)
+	nextTime := time.Now().Add(time.Duration(period) * time.Second)
+outer:
+	for loopcount := 0; true; loopcount++ {
+		for n, node := range nodelist.Items {
+			// For each node in the cluster (with the test label):
+			//     Get the list of running pods in the test deployment on this node
+			pods := &corev1.PodList{}
+			listOptions := &client.ListOptions{
+				Namespace: testconfig.TestNamespace,
+				LabelSelector: labels.SelectorFromSet(labels.Set{
+					"app":  "ttfr",
+					"pod":  fmt.Sprintf("ttfr-test-%.2d", n),
+					"node": node.ObjectMeta.Name,
+				}),
+			}
+			err = clients.CtrlClient.List(ctx, pods, listOptions)
+			if err != nil {
+				log.WithError(err).Error("error listing pods")
+				return ttfrResults, err
+			}
+			log.Info("Pods in deployment: ", len(pods.Items))
 
-		//     For each pod in the deployment:
-		for i, pod := range pods.Items {
-			//       if it is the first time round the loop, delete the pod, don't check result
-			if i == 0 {
-				log.Info("Deleting pod ", pod.ObjectMeta.Name)
-				err = clients.CtrlClient.Delete(ctx, &pod)
-				if err != nil {
-					log.WithError(err).Error("error deleting pod")
-					return ttfrResults, err
+			numThreads := 10
+			// Spin up a channel with multiple threads to get TTFRs from pods
+			var wg sync.WaitGroup
+			ttfrs := make([](float64), len(pods.Items))
+			errors := make([]error, len(pods.Items))
+			sem := make(chan struct{}, numThreads)
+
+			//     For each pod in the deployment:
+		nextpod:
+			for p, pod := range pods.Items {
+				if time.Now().After(endtime) {
+					log.Info("Time's up, stopping test")
+					break outer
 				}
-				continue
+				// if it is the first time round the loop, delete the pod, don't check result
+				if loopcount == 0 {
+					log.Info("Deleting pod ", pod.ObjectMeta.Name)
+					err = clients.CtrlClient.Delete(ctx, &pod)
+					if err != nil {
+						log.WithError(err).Error("error deleting pod")
+						return ttfrResults, err
+					}
+					// we haven't started the test yet, so update the next time
+					delay := time.Until(nextTime)
+					if delay > 0 {
+						log.Infof("Sleeping for %s", delay)
+						time.Sleep(delay)
+					} else {
+						log.Warning("unable to keep up with rate")
+					}
+					nextTime = time.Now().Add(time.Duration(period) * time.Second)
+					continue nextpod
+				}
+				sem <- struct{}{}
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					defer func() { <-sem }()
+					// if pod is deleting skip it
+					if pod.DeletionTimestamp != nil {
+						log.Info("Pod ", pod.ObjectMeta.Name, " is deleting, skipping")
+						err = fmt.Errorf("pod %s is deleting", pod.ObjectMeta.Name)
+						ttfrs[p] = 99999
+						errors[p] = err
+						return
+					}
+					ttfrSec, err := getPodTTFR(ctx, clients, pod)
+					if err != nil {
+						if strings.Contains(err.Error(), "not found") {
+							err = fmt.Errorf("pod not found: %s", pod.ObjectMeta.Name)
+							ttfrs[p] = 99999
+							errors[p] = err
+							return
+						}
+						err = fmt.Errorf("error getting pod TTFR: %w", err)
+						ttfrs[p] = 99999
+						errors[p] = err
+						return
+					}
+					ttfrs[p] = ttfrSec
+					errors[p] = nil
+					return
+				}()
+				delay := time.Until(nextTime)
+				if delay > 0 {
+					log.Infof("Sleeping for %s", delay)
+					time.Sleep(delay)
+				} else {
+					log.Warning("unable to keep up with rate")
+				}
+				nextTime = time.Now().Add(time.Duration(period) * time.Second)
 			}
-			//       if it isn't the first time round the loop, read pod logs to see if there's a result yet
-			logs, err := utils.GetPodLogs(ctx, clients, pod.ObjectMeta.Name, testconfig.TestNamespace)
-			if err != nil {
-				log.WithError(err).Error("error getting pod logs")
-				return ttfrResults, err
-			}
-			//         if we got a result:
-			r := regexp.MustCompile(`{\\"ttfr_seconds\\": ([0-9]\.[0-9].*)}`)
-			results := r.FindStringSubmatch(logs)
-			log.Info("TTFR result: ", results)
-			if len(results) == 0 {
-				log.Info("No result found in logs")
-				continue
-			}
-			//           Parse the result and append to list of results
-			ttfrSec, err := strconv.ParseFloat(results[1], 64)
-			if err != nil {
-				log.WithError(err).Error("error parsing ttfr result")
-				return ttfrResults, err
-			}
-			log.Info("TTFR result: ", ttfrSec)
-			ttfrResults.TTFR = append(ttfrResults.TTFR, ttfrSec)
-			//           delete the pod
-			err = clients.CtrlClient.Delete(ctx, &pod)
-			if err != nil {
-				log.WithError(err).Error("error deleting pod")
-				return ttfrResults, err
+			wg.Wait()
+			// we now have a list of errors, and list of ttfrs.
+			log.Debugf("Errors: %v+", errors)
+			for t, err := range errors {
+				if err == nil {
+					// copy all results that don't have an error to the results
+					log.Info("Copying over TTFR result: ", ttfrs[t])
+					ttfrResults.TTFR = append(ttfrResults.TTFR, ttfrs[t])
+				} else {
+					switch {
+					case strings.Contains(err.Error(), "pod not found"):
+						log.Info("error getting pod TTFR")
+					case strings.Contains(err.Error(), "pod is deleting"):
+						log.Info("Pod is deleting, skipping")
+					default:
+						log.WithError(err).Error("error getting pod TTFR")
+					}
+				}
 			}
 		}
 	}
+	log.Info("Test complete, got ", len(ttfrResults.TTFR), " results")
 	return ttfrResults, nil
+}
+
+// getPodTTFR gets the TTFR from the pod logs (with retry), and deletes the pod when successful
+func getPodTTFR(ctx context.Context, clients config.Clients, pod corev1.Pod) (float64, error) {
+
+	// retry getting pod logs
+	for j := 0; j < 20; j++ {
+		// if pod isn't running yet, wait for it to be running
+		podRunning, err := utils.IsPodRunning(ctx, clients, &pod)
+		if !podRunning || err != nil {
+			log.Info("Pod ", pod.ObjectMeta.Name, " is not running, skipping")
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		logs, err := utils.GetPodLogs(ctx, clients, pod.ObjectMeta.Name, pod.ObjectMeta.Namespace)
+		if err != nil {
+			log.WithError(err).Error("error getting pod logs")
+			if strings.Contains(err.Error(), "not found") {
+				return 99999, err
+			}
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		//         if we got a result:
+		r := regexp.MustCompile(`{\\"ttfr_seconds\\": ([0-9].*\.[0-9].*)}`)
+		results := r.FindStringSubmatch(logs)
+		if len(results) == 0 {
+			log.Info("No result found in logs")
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		//           Parse the result and append to list of results
+		ttfrSec, err := strconv.ParseFloat(results[1], 64)
+		if err != nil {
+			log.WithError(err).Error("error parsing ttfr result")
+			return ttfrSec, err
+		}
+		log.Info("TTFR result: ", ttfrSec, " from pod ", pod.ObjectMeta.Name)
+		//           delete the pod
+		err = clients.CtrlClient.Delete(ctx, &pod)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				return 99999, err
+			}
+			log.WithError(err).Error("error deleting pod")
+			return ttfrSec, err
+		}
+		// Success! we made it all the way through without error
+		return ttfrSec, nil
+	}
+	return 99999, fmt.Errorf("failed to get pod logs after 10 attempts for pod %s", pod.ObjectMeta.Name)
 }
 
 // SummarizeResults summarizes the results
 func SummarizeResults(ttfrResults []*Results) ([]*ResultSummary, error) {
+	log.Debug("Summarizing results")
 	if len(ttfrResults) == 0 {
 		return nil, fmt.Errorf("no results to summarize")
 	}
@@ -238,7 +342,12 @@ func makeDeployment(nodename string, namespace string, depname string, hostnetwo
 									Name:  "PORT",
 									Value: "8080",
 								},
+								{
+									Name:  "PROTOCOL",
+									Value: "http",
+								},
 							},
+							// ImagePullPolicy: corev1.PullAlways,
 						},
 					},
 					NodeName:      nodename,

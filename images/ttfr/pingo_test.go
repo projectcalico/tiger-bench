@@ -151,6 +151,7 @@ func Test_noPushGW(t *testing.T) {
 	basicEnv := []envVar{
 		{key: "ADDRESS", value: host},
 		{key: "PORT", value: port},
+		{key: "QUIT_AFTER", value: "1"},
 	}
 
 	tests := []struct {
@@ -175,8 +176,11 @@ func Test_noPushGW(t *testing.T) {
 				t.Errorf("Expected logs to be captured, but got none")
 			}
 			assert.Contains(t, capturedLogs, "ttfr_seconds")
-			r := regexp.MustCompile(`{\\"ttfr_seconds\\": ([0-9]\.[0-9].*)}`)
+			r := regexp.MustCompile(`{\\"ttfr_seconds\\": ([0-9].*\.[0-9].*)}`)
 			matches := r.FindStringSubmatch(capturedLogs)
+			if len(matches) < 2 {
+				t.Errorf("Expected regex to match, but didn't get enough matches: %v from %v", matches, capturedLogs)
+			}
 			ttfrString := matches[1]
 			if len(ttfrString) == 0 {
 				t.Errorf("Expected regex to match, but got none")
@@ -194,7 +198,7 @@ func Test_noPushGW(t *testing.T) {
 
 func Test_regex(t *testing.T) {
 	capturedLogs := "time=\"2025-05-02T14:04:07+01:00\" level=info msg=\"Pingo started at 2025-05-02 14:04:07.029670625 +0100 BST m=+0.000956863\"\ntime=\"2025-05-02T14:04:07+01:00\" level=info msg=\"Response status code 200 protocol tcp\"\ntime=\"2025-05-02T14:04:07+01:00\" level=info msg=\"Response status code 200 protocol tcp\"\ntime=\"2025-05-02T14:04:07+01:00\" level=info msg=\"TTFR found: was 0.016565863\"\ntime=\"2025-05-02T14:04:07+01:00\" level=info msg=\"Started everything!\"\ntime=\"2025-05-02T14:04:07+01:00\" level=info msg=\"Starting connectivity check to &{0xc00021c5a0 http://127.0.0.1:40379 tcp 0xc0002001e0 0xc000200300 false} rate 1\"\ntime=\"2025-05-02T14:04:07+01:00\" level=info msg=\"Response status code 200 protocol tcp\"\ntime=\"2025-05-02T14:04:07+01:00\" level=info msg=\"{\\\"ttfr_seconds\\\": 0.016565863}\"\n"
-	r := regexp.MustCompile(`{\\"ttfr_seconds\\": ([0-9]\.[0-9].*)}`)
+	r := regexp.MustCompile(`{\\"ttfr_seconds\\": ([0-9].*\.[0-9].*)}`)
 	matches := r.FindStringSubmatch(capturedLogs)
 	if len(matches) < 2 {
 		t.Errorf("Expected regex to match, but didn't get enough matches: %v", matches)

@@ -29,6 +29,7 @@ import (
 	operatorv1 "github.com/tigera/operator/api/v1"
 	"golang.org/x/net/proxy"
 	appsv1 "k8s.io/api/apps/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -294,6 +295,10 @@ func newClientSet(config Config) (*kubernetes.Clientset, ctrlclient.Client) {
 	}
 
 	scheme := runtime.NewScheme()
+	err = networkingv1.AddToScheme(scheme)
+	if err != nil {
+		log.WithError(err).Panic("failed to add networkingv1 to scheme")
+	}
 	err = operatorv1.AddToScheme(scheme)
 	if err != nil {
 		log.WithError(err).Panic("failed to add operatorv1 to scheme")

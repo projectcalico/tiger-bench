@@ -118,6 +118,7 @@ func SummarizeResults(results []float64) (ResultSummary, error) {
 		log.WithError(err).Warning("Error summarizing stats")
 		return summary, err
 	}
+	log.Debugf("Summary: %+v", summary)
 	return summary, nil
 }
 
