@@ -43,29 +43,34 @@ func ConfigureCluster(ctx context.Context, cfg config.Config, clients config.Cli
 	log.Debug("entering configureCluster function")
 	err := updateEncap(ctx, cfg, clients, testConfig.Encap)
 	if err != nil {
-		return fmt.Errorf("failed to update encapsulation")
+		log.WithError(err).Error("failed to update encapsulation")
+		return err
 	}
 	if testConfig.Dataplane == config.DataPlaneBPF {
 		err = enableBPF(ctx, cfg, clients)
 		if err != nil {
-			return fmt.Errorf("failed to enable BPF")
+			log.WithError(err).Error("failed to enable BPF")
+			return err
 		}
 	} else if testConfig.Dataplane == config.DataPlaneIPTables {
 		err = enableIptables(ctx, clients)
 		if err != nil {
-			return fmt.Errorf("failed to enable iptables")
+			log.WithError(err).Error("failed to enable iptables")
+			return err
 		}
 	} else if testConfig.Dataplane == config.DataPlaneUnset {
 		log.Info("No dataplane specified, using whatever is already set")
 	} else {
-		return fmt.Errorf("invalid dataplane requested: %s", testConfig.Dataplane)
+		log.WithError(err).Errorf("invalid dataplane requested: %s", testConfig.Dataplane)
+		return err
 	}
 
 	if testConfig.TestKind == config.TestKindDNSPerf {
 		if testConfig.DNSPerf.Mode != config.DNSPerfModeUnset {
 			err = patchFelixConfig(ctx, clients, testConfig)
 			if err != nil {
-				return fmt.Errorf("failed to patch felixconfig")
+				log.WithError(err).Error("failed to patch felixconfig")
+				return err
 			}
 		} else {
 			log.Warn("No DNSPerfMode specified, using whatever is already set")
@@ -74,7 +79,8 @@ func ConfigureCluster(ctx context.Context, cfg config.Config, clients config.Cli
 	if testConfig.CalicoNodeCPULimit != "" {
 		err = SetCalicoNodeCPULimit(ctx, clients, testConfig.CalicoNodeCPULimit)
 		if err != nil {
-			return fmt.Errorf("failed to set calico-node CPU limit")
+			log.WithError(err).Error("failed to set calico-node CPU limit")
+			return err
 		}
 	} else {
 		log.Warn("No CalicoNodeCPULimit specified, using whatever is already set")
@@ -88,7 +94,8 @@ func patchFelixConfig(ctx context.Context, clients config.Clients, testConfig co
 	felixconfig := &v3.FelixConfiguration{}
 	err := clients.CtrlClient.Get(ctx, ctrlclient.ObjectKey{Name: "default"}, felixconfig)
 	if err != nil {
-		return fmt.Errorf("failed to get felixconfig")
+		log.WithError(err).Error("failed to get felixconfig")
+		return err
 	}
 	log.Debug("felixconfig is", felixconfig)
 	dnsPolicyMode := testConfig.DNSPerf.Mode
@@ -192,7 +199,8 @@ func SetCalicoNodeCPULimit(ctx context.Context, clients config.Clients, limit st
 
 	err = waitForTigeraStatus(ctx, clients)
 	if err != nil {
-		return fmt.Errorf("error waiting for tigera status")
+		log.WithError(err).Error("error waiting for tigera status")
+		return err
 	}
 	return err
 }
@@ -427,7 +435,8 @@ func SetupStandingConfig(ctx context.Context, clients config.Clients, testConfig
 	log.Info("Waiting for all pods to be running")
 	err = utils.WaitForDeployment(ctx, clients, deployment)
 	if err != nil {
-		return fmt.Errorf("error waiting for pods to deploy in standing-deployment")
+		log.WithError(err).Error("error waiting for pods to deploy in standing-deployment")
+		return err
 	}
 
 	// Deploy services
@@ -435,17 +444,20 @@ func SetupStandingConfig(ctx context.Context, clients config.Clients, testConfig
 	deployment = makeDeployment(namespace, "standing-svc", 10, false, webServerImage, []string{})
 	deployment, err = utils.GetOrCreateDeployment(ctx, clients, deployment)
 	if err != nil {
-		return fmt.Errorf("error creating deployment standing-svc")
+		log.WithError(err).Error("error creating deployment standing-svc")
+		return err
 	}
 	err = utils.ScaleDeployment(ctx, clients, deployment, 10) // When deployment exists but isn't scaled right, this might be needed.
 	if err != nil {
-		return fmt.Errorf("error scaling deployment standing-svc")
+		log.WithError(err).Error("error scaling deployment standing-svc")
+		return err
 	}
 	//wait for pods to deploy
 	log.Info("Waiting for all pods to be running")
 	err = utils.WaitForDeployment(ctx, clients, deployment)
 	if err != nil {
-		return fmt.Errorf("error waiting for pods to deploy in standing-svc")
+		log.WithError(err).Error("error waiting for pods to deploy in standing-svc")
+		return err
 	}
 	// Spin up a channel with multiple threads to create services, because a single thread is limited to 5 actions per second
 	const numThreads = 10

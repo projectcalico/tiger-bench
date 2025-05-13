@@ -198,7 +198,8 @@ func writeResultToFile(filename string, results []results.Result) (err error) {
 	log.Debug("entering writeResultToFile function")
 	file, err := os.Create(filename)
 	if err != nil {
-		return fmt.Errorf("failed to open output file: %s", filename)
+		log.WithError(err).Errorf("failed to open output file: %s", filename)
+		return err
 	}
 	defer func() {
 		closeErr := file.Close()
@@ -208,11 +209,13 @@ func writeResultToFile(filename string, results []results.Result) (err error) {
 	}()
 	output, err := json.MarshalIndent(results, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal results: %s", err)
+		log.WithError(err).Errorf("failed to marshal results: %s", err)
+		return err
 	}
 	_, err = file.Write(output)
 	if err != nil {
-		return fmt.Errorf("failed to write results to file: %s", err)
+		log.WithError(err).Errorf("failed to write results to file: %s", err)
+		return err
 	}
 	return nil
 }
