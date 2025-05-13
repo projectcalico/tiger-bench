@@ -1,7 +1,7 @@
 all: image
 
 REGISTRY?=quay.io
-VERSION?=v0.2.0
+VERSION?=v0.2.1
 ORG?=tigeradev
 NAME?=perf
 
