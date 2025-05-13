@@ -61,8 +61,7 @@ func ConfigureCluster(ctx context.Context, cfg config.Config, clients config.Cli
 	} else if testConfig.Dataplane == config.DataPlaneUnset {
 		log.Info("No dataplane specified, using whatever is already set")
 	} else {
-		log.WithError(err).Errorf("invalid dataplane requested: %s", testConfig.Dataplane)
-		return err
+		return fmt.Errorf("invalid dataplane requested: %s", testConfig.Dataplane)
 	}
 
 	if testConfig.TestKind == config.TestKindDNSPerf {

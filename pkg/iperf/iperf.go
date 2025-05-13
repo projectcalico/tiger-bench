@@ -269,7 +269,7 @@ func DeployIperfPods(ctx context.Context, clients config.Clients, namespace stri
 	nodelist := &corev1.NodeList{}
 	err := clients.CtrlClient.List(ctx, nodelist)
 	if err != nil {
-		log.WithError(err).Error("failed to list nodes: %w", err)
+		log.WithError(err).Error("failed to list nodes")
 		return err
 	}
 	for _, node := range nodelist.Items {

@@ -16,6 +16,7 @@ package cluster
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -280,8 +281,7 @@ func updateEncap(ctx context.Context, cfg config.Config, clients config.Clients,
 	} else if encap == config.EncapUnset {
 		log.Info("No encapsulation specified, using whatever is already set")
 	} else {
-		log.WithError(err).Errorf("invalid encapsulation %s", encap)
-		return err
+		return fmt.Errorf("invalid encapsulation %s", encap)
 	}
 
 	if semver.Compare(cfg.CalicoVersion, "v3.28.0") < 0 {
