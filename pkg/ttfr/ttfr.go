@@ -15,7 +15,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	log "github.com/sirupsen/logrus"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -47,6 +46,7 @@ func RunTTFRTest(ctx context.Context, clients config.Clients, testconfig *config
 	if len(nodelist.Items) == 0 {
 		return ttfrResults, fmt.Errorf("no nodes found with label tigera.io/test-nodepool=default-pool")
 	}
+	targets := make([]string, len(nodelist.Items))
 	for i, node := range nodelist.Items {
 		// For each node in the cluster (with the test label):
 		//   Create server pod on this node
@@ -68,107 +68,75 @@ func RunTTFRTest(ctx context.Context, clients config.Clients, testconfig *config
 		}
 		podIP := pods[0].Status.PodIP
 		log.Infof("Server pod IP: %s", podIP)
-
-		//   Create a test pod deployment (of pingo pods), which will contact the server pod on the same node (we are testing control plane performance, not node-node latency)
-		depname := fmt.Sprintf("ttfr-test-%.2d", i)
-		dep := makeDeployment(node.ObjectMeta.Name, testconfig.TestNamespace, depname, testconfig.HostNetwork, cfg.TTFRImage, int32(testconfig.TTFRConfig.TestPodsPerNode), podIP)
-		_, err = utils.GetOrCreateDeployment(ctx, clients, dep)
-		if err != nil {
-			log.WithError(err).Error("error making test deployment")
-			return ttfrResults, err
-		}
-		//   Wait for the test deployment pods to be ready
-		_, err = utils.WaitForTestPods(ctx, clients, testconfig.TestNamespace, fmt.Sprintf("app=ttfr,pod=%s,node=%s", depname, node.ObjectMeta.Name))
-		if err != nil {
-			log.WithError(err).Error("error waiting for test deployment to be ready")
-			return ttfrResults, err
-		}
+		targets[i] = podIP
 	}
 	endtime := time.Now().Add(time.Duration(testconfig.TTFRConfig.TestDuration) * time.Second)
 	period := 1.0 / float64(testconfig.TTFRConfig.Rate)
 	nextTime := time.Now().Add(time.Duration(period) * time.Second)
 outer:
 	for loopcount := 0; true; loopcount++ {
+		numThreads := 100
+		// Spin up a channel with multiple threads to get TTFRs from pods
+		var wg sync.WaitGroup
+
+		// Make 2D arrays of ttfrs and errors, node x pod
+		ttfrs := make([][]float64, len(nodelist.Items))
+		for i := range ttfrs {
+			ttfrs[i] = make([]float64, testconfig.TTFRConfig.TestPodsPerNode)
+		}
+		errors := make([][]error, len(nodelist.Items))
+		for i := range errors {
+			errors[i] = make([]error, testconfig.TTFRConfig.TestPodsPerNode)
+		}
+
+		sem := make(chan struct{}, numThreads)
+
 		for n, node := range nodelist.Items {
 			// For each node in the cluster (with the test label):
-			//     Get the list of running pods in the test deployment on this node
-			pods := &corev1.PodList{}
-			listOptions := &client.ListOptions{
-				Namespace: testconfig.TestNamespace,
-				LabelSelector: labels.SelectorFromSet(labels.Set{
-					"app":  "ttfr",
-					"pod":  fmt.Sprintf("ttfr-test-%.2d", n),
-					"node": node.ObjectMeta.Name,
-				}),
-			}
-			err = clients.CtrlClient.List(ctx, pods, listOptions)
-			if err != nil {
-				log.WithError(err).Error("error listing pods")
-				return ttfrResults, err
-			}
-			log.Info("Pods in deployment: ", len(pods.Items))
 
-			numThreads := 10
-			// Spin up a channel with multiple threads to get TTFRs from pods
-			var wg sync.WaitGroup
-			ttfrs := make([](float64), len(pods.Items))
-			errors := make([]error, len(pods.Items))
-			sem := make(chan struct{}, numThreads)
-
-			//     For each pod in the deployment:
-		nextpod:
-			for p, pod := range pods.Items {
-				if time.Now().After(endtime) {
-					log.Info("Time's up, stopping test")
-					break outer
-				}
-				// if it is the first time round the loop, delete the pod, don't check result
-				if loopcount == 0 {
-					log.Info("Deleting pod ", pod.ObjectMeta.Name)
-					err = clients.CtrlClient.Delete(ctx, &pod)
-					if err != nil {
-						log.WithError(err).Error("error deleting pod")
-						return ttfrResults, err
-					}
-					// we haven't started the test yet, so update the next time
-					delay := time.Until(nextTime)
-					if delay > 0 {
-						log.Infof("Sleeping for %s", delay)
-						time.Sleep(delay)
-					} else {
-						log.Warning("unable to keep up with rate")
-					}
-					nextTime = time.Now().Add(time.Duration(period) * time.Second)
-					continue nextpod
-				}
+			//     For each pod
+			for p := range testconfig.TTFRConfig.TestPodsPerNode {
 				sem <- struct{}{}
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
 					defer func() { <-sem }()
-					// if pod is deleting skip it
-					if pod.DeletionTimestamp != nil {
-						log.Info("Pod ", pod.ObjectMeta.Name, " is deleting, skipping")
-						err = fmt.Errorf("pod %s is deleting", pod.ObjectMeta.Name)
-						ttfrs[p] = 99999
-						errors[p] = err
+					ttfrs[n][p] = 99999
+					// Create a pod on this node
+					podname := fmt.Sprintf("ttfr-%.2d-%.2d-%.2d", loopcount, n, p)
+					pod := makeTestPod(node.ObjectMeta.Name, testconfig.TestNamespace, podname, testconfig.HostNetwork, cfg.TTFRImage, targets[n])
+					defer func() {
+						// delete the pod
+						_ = clients.CtrlClient.Delete(ctx, &pod)
+					}()
+					err = clients.CtrlClient.Create(ctx, &pod)
+					if err != nil {
+						log.WithError(err).Error("error making pod")
+						errors[n][p] = err
 						return
 					}
+
+					// Wait for the pod to be ready
+					_, err = utils.WaitForTestPods(ctx, clients, testconfig.TestNamespace, fmt.Sprintf("pod=%s", podname))
+					if err != nil {
+						log.WithError(err).Error("error waiting for pod to be ready")
+						errors[n][p] = err
+						return
+					}
+
 					ttfrSec, err := getPodTTFR(ctx, clients, pod)
 					if err != nil {
 						if strings.Contains(err.Error(), "not found") {
 							err = fmt.Errorf("pod not found: %s", pod.ObjectMeta.Name)
-							ttfrs[p] = 99999
-							errors[p] = err
+							errors[n][p] = err
 							return
 						}
 						err = fmt.Errorf("error getting pod TTFR: %w", err)
-						ttfrs[p] = 99999
-						errors[p] = err
+						errors[n][p] = err
 						return
 					}
-					ttfrs[p] = ttfrSec
-					errors[p] = nil
+					ttfrs[n][p] = ttfrSec
+					errors[n][p] = err
 					return
 				}()
 				delay := time.Until(nextTime)
@@ -180,14 +148,17 @@ outer:
 				}
 				nextTime = time.Now().Add(time.Duration(period) * time.Second)
 			}
-			wg.Wait()
-			// we now have a list of errors, and list of ttfrs.
-			log.Debugf("Errors: %v+", errors)
-			for t, err := range errors {
+		}
+		wg.Wait()
+		// we now have a 2D list of errors, and matching list of ttfrs.
+		log.Debugf("Errors: %v+", errors)
+		for n := range len(nodelist.Items) {
+			for p := range testconfig.TTFRConfig.TestPodsPerNode {
+				err := errors[n][p]
 				if err == nil {
 					// copy all results that don't have an error to the results
-					log.Info("Copying over TTFR result: ", ttfrs[t])
-					ttfrResults.TTFR = append(ttfrResults.TTFR, ttfrs[t])
+					log.Debug("Copying over TTFR result: ", ttfrs[n][p])
+					ttfrResults.TTFR = append(ttfrResults.TTFR, ttfrs[n][p])
 				} else {
 					switch {
 					case strings.Contains(err.Error(), "pod not found"):
@@ -199,6 +170,10 @@ outer:
 					}
 				}
 			}
+		}
+		if time.Now().After(endtime) {
+			log.Info("Time's up, stopping test")
+			break outer
 		}
 	}
 	log.Info("Test complete, got ", len(ttfrResults.TTFR), " results")
@@ -306,64 +281,44 @@ func makePod(nodename string, namespace string, podname string, hostnetwork bool
 	return pod
 }
 
-func makeDeployment(nodename string, namespace string, depname string, hostnetwork bool, image string, replicas int32, target string) appsv1.Deployment {
-	depname = utils.SanitizeString(depname)
-	deployment := appsv1.Deployment{
+func makeTestPod(nodename string, namespace string, podname string, hostnetwork bool, image string, target string) corev1.Pod {
+	podname = utils.SanitizeString(podname)
+	pod := corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Labels: map[string]string{
 				"app":  "ttfr",
-				"pod":  depname,
+				"pod":  podname,
 				"node": nodename,
 			},
-			Name:      depname,
+			Name:      podname,
 			Namespace: namespace,
 		},
-		Spec: appsv1.DeploymentSpec{
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"app":  "ttfr",
-						"pod":  depname,
-						"node": nodename,
-					},
-				},
-				Spec: corev1.PodSpec{
-
-					Containers: []corev1.Container{
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name:  "ttfr",
+					Image: image,
+					Env: []corev1.EnvVar{
 						{
-							Name:  "ttfr",
-							Image: image,
-							Env: []corev1.EnvVar{
-								{
-									Name:  "ADDRESS",
-									Value: target,
-								},
-								{
-									Name:  "PORT",
-									Value: "8080",
-								},
-								{
-									Name:  "PROTOCOL",
-									Value: "http",
-								},
-							},
-							// ImagePullPolicy: corev1.PullAlways,
+							Name:  "ADDRESS",
+							Value: target,
+						},
+						{
+							Name:  "PORT",
+							Value: "8080",
+						},
+						{
+							Name:  "PROTOCOL",
+							Value: "http",
 						},
 					},
-					NodeName:      nodename,
-					RestartPolicy: "Always",
-					HostNetwork:   hostnetwork,
+					// ImagePullPolicy: corev1.PullAlways,
 				},
 			},
-			Replicas: &replicas,
-			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"app":  "ttfr",
-					"pod":  depname,
-					"node": nodename,
-				},
-			},
+			NodeName:      nodename,
+			RestartPolicy: "Always",
+			HostNetwork:   hostnetwork,
 		},
 	}
-	return deployment
+	return pod
 }
