@@ -1,3 +1,34 @@
+// Copyright (c) 2024-2025 Tigera, Inc. All rights reserved.
+
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// This "time to first response" (TTFR) test spins up a server pod on each
+// node in the cluster, and then spins up client pods on each node in the
+// cluster.  The client pods start and send requests to the server pod, and
+// record the amount of time it takes before they get a response.  This is
+// sometimes* a useful proxy for how long its taking for Calico to program the
+// rules for that pod (since pods start with a deny-all rule and calico-node
+// must program the correct rules before it can talk to anything).
+//
+// * if `linuxPolicySetupTimeoutSeconds` is set in the CalicoNetworkSpec in
+//   the Installation resource, then pod startup will be delayed until policy
+//   is applied.
+//   This can be handy if your application pod wants its first request to
+//   always succeed.
+//   This is a Calico-specific feature that is not part of the CNI spec.  See
+//   the [Calico documentation](https://docs.tigera.io/calico/latest/reference/configure-cni-plugins#enabling-policy-setup-timeout)
+//   for more information on this feature and how to enable it.
+
 package ttfr
 
 import (
@@ -70,30 +101,25 @@ func RunTTFRTest(ctx context.Context, clients config.Clients, testconfig *config
 		log.Infof("Server pod IP: %s", podIP)
 		targets[i] = podIP
 	}
-	endtime := time.Now().Add(time.Duration(testconfig.TTFRConfig.TestDuration) * time.Second)
-	period := 1.0 / float64(testconfig.TTFRConfig.Rate)
-	nextTime := time.Now().Add(time.Duration(period) * time.Second)
+	startTime := time.Now()
+	endtime := startTime.Add(time.Duration(testconfig.Duration) * time.Second)
+	period := 1000.0 / testconfig.TTFRConfig.Rate
+	log.Debug("period: ", period, "ms")
+	nextTime := startTime.Add(time.Duration(period) * time.Millisecond)
+
+	var wg sync.WaitGroup
+
+	// Make slices to hold ttfrs and errors
+	var ttfrs []float64
+	var errors []error
+
+	numThreads := len(nodelist.Items) * testconfig.TTFRConfig.TestPodsPerNode
+	sem := make(chan struct{}, numThreads)
+
 outer:
 	for loopcount := 0; true; loopcount++ {
-		numThreads := 100
-		// Spin up a channel with multiple threads to get TTFRs from pods
-		var wg sync.WaitGroup
-
-		// Make 2D arrays of ttfrs and errors, node x pod
-		ttfrs := make([][]float64, len(nodelist.Items))
-		for i := range ttfrs {
-			ttfrs[i] = make([]float64, testconfig.TTFRConfig.TestPodsPerNode)
-		}
-		errors := make([][]error, len(nodelist.Items))
-		for i := range errors {
-			errors[i] = make([]error, testconfig.TTFRConfig.TestPodsPerNode)
-		}
-
-		sem := make(chan struct{}, numThreads)
-
+		// For each node in the cluster (with the test label):
 		for n, node := range nodelist.Items {
-			// For each node in the cluster (with the test label):
-
 			//     For each pod
 			for p := range testconfig.TTFRConfig.TestPodsPerNode {
 				sem <- struct{}{}
@@ -101,7 +127,6 @@ outer:
 				go func() {
 					defer wg.Done()
 					defer func() { <-sem }()
-					ttfrs[n][p] = 99999
 					// Create a pod on this node
 					podname := fmt.Sprintf("ttfr-%.2d-%.2d-%.2d", loopcount, n, p)
 					pod := makeTestPod(node.ObjectMeta.Name, testconfig.TestNamespace, podname, testconfig.HostNetwork, cfg.TTFRImage, targets[n])
@@ -112,7 +137,8 @@ outer:
 					err = clients.CtrlClient.Create(ctx, &pod)
 					if err != nil {
 						log.WithError(err).Error("error making pod")
-						errors[n][p] = err
+						ttfrs = append(ttfrs, 99999)
+						errors = append(errors, err)
 						return
 					}
 
@@ -120,7 +146,8 @@ outer:
 					_, err = utils.WaitForTestPods(ctx, clients, testconfig.TestNamespace, fmt.Sprintf("pod=%s", podname))
 					if err != nil {
 						log.WithError(err).Error("error waiting for pod to be ready")
-						errors[n][p] = err
+						ttfrs = append(ttfrs, 99999)
+						errors = append(errors, err)
 						return
 					}
 
@@ -128,55 +155,63 @@ outer:
 					if err != nil {
 						if strings.Contains(err.Error(), "not found") {
 							err = fmt.Errorf("pod not found: %s", pod.ObjectMeta.Name)
-							errors[n][p] = err
+							ttfrs = append(ttfrs, 99999)
+							errors = append(errors, err)
 							return
 						}
 						err = fmt.Errorf("error getting pod TTFR: %w", err)
-						errors[n][p] = err
+						ttfrs = append(ttfrs, 99999)
+						errors = append(errors, err)
 						return
 					}
-					ttfrs[n][p] = ttfrSec
-					errors[n][p] = err
-					return
+					ttfrs = append(ttfrs, ttfrSec)
+					errors = append(errors, err)
 				}()
 				delay := time.Until(nextTime)
 				if delay > 0 {
-					log.Infof("Sleeping for %s", delay)
+					log.Debugf("Sleeping for %s", delay)
 					time.Sleep(delay)
 				} else {
 					log.Warning("unable to keep up with rate")
-				}
-				nextTime = time.Now().Add(time.Duration(period) * time.Second)
-			}
-		}
-		wg.Wait()
-		// we now have a 2D list of errors, and matching list of ttfrs.
-		log.Debugf("Errors: %v+", errors)
-		for n := range len(nodelist.Items) {
-			for p := range testconfig.TTFRConfig.TestPodsPerNode {
-				err := errors[n][p]
-				if err == nil {
-					// copy all results that don't have an error to the results
-					log.Debug("Copying over TTFR result: ", ttfrs[n][p])
-					ttfrResults.TTFR = append(ttfrResults.TTFR, ttfrs[n][p])
-				} else {
-					switch {
-					case strings.Contains(err.Error(), "pod not found"):
-						log.Info("error getting pod TTFR")
-					case strings.Contains(err.Error(), "pod is deleting"):
-						log.Info("Pod is deleting, skipping")
-					default:
-						log.WithError(err).Error("error getting pod TTFR")
+					if numThreads-len(sem) == 0 {
+						log.Info("Not enough free pods to make requested rate, blocking until one is freed")
 					}
 				}
+				nextTime = nextTime.Add(time.Duration(period) * time.Millisecond)
+				// if we are at the end of the test, break out of the loop
+				if time.Now().After(endtime) {
+					log.Info("Time's up, stopping test (but allowing pods already requested to finish)")
+					break outer
+				}
 			}
 		}
-		if time.Now().After(endtime) {
-			log.Info("Time's up, stopping test")
-			break outer
+
+	}
+	wg.Wait()
+	// we now have a slice of errors, and matching slice of ttfrs.
+	log.Debugf("Errors: %v+", errors)
+	numerrs := 0
+	numresults := 0
+	for i, err := range errors {
+		if err == nil {
+			// copy all results that don't have an error to the results
+			numresults++
+			log.Debug("Copying over TTFR result: ", ttfrs[i])
+			ttfrResults.TTFR = append(ttfrResults.TTFR, ttfrs[i])
+		} else {
+			numerrs++
+			switch {
+			case strings.Contains(err.Error(), "pod not found"):
+				log.Info("error getting pod TTFR")
+			case strings.Contains(err.Error(), "pod is deleting"):
+				log.Info("Pod is deleting, skipping")
+			default:
+				log.WithError(err).Error("error getting pod TTFR")
+			}
 		}
 	}
-	log.Info("Test complete, got ", len(ttfrResults.TTFR), " results")
+	log.Debugf("Test complete, got %d results and %d errors", numresults, numerrs)
+	log.Debug("ttfrResults.TTFR length = ", len(ttfrResults.TTFR))
 	return ttfrResults, nil
 }
 
@@ -248,6 +283,7 @@ func SummarizeResults(ttfrResults []*Results) ([]*ResultSummary, error) {
 			log.WithError(err).Error("error summarizing results")
 			return nil, err
 		}
+		resultSummary.TTFRSummary.Unit = "seconds"
 		// Add the summary to the list
 		resultSummaryList = append(resultSummaryList, &resultSummary)
 	}
@@ -312,7 +348,6 @@ func makeTestPod(nodename string, namespace string, podname string, hostnetwork 
 							Value: "http",
 						},
 					},
-					// ImagePullPolicy: corev1.PullAlways,
 				},
 			},
 			NodeName:      nodename,

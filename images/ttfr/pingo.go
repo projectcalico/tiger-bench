@@ -479,5 +479,3 @@ func randString(n int) string {
 	}
 	return string(b)
 }
-
-// kubectl debug -it ephemeral-demo --image=busybox:1.28 --target=ephemeral-demo

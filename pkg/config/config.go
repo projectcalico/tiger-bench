@@ -29,8 +29,8 @@ import (
 	operatorv1 "github.com/tigera/operator/api/v1"
 	"golang.org/x/net/proxy"
 	appsv1 "k8s.io/api/apps/v1"
-	networkingv1 "k8s.io/api/networking/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/yaml"
@@ -154,9 +154,8 @@ type DNSConfig struct {
 
 // TTFRConfig contains the configuration specific to TTFR tests.
 type TTFRConfig struct {
-	TestDuration    int `validate:"gte=0"`
-	TestPodsPerNode int `validate:"gte=0"`
-	Rate            int `validate:"gte=0"`
+	TestPodsPerNode int     `validate:"gte=0"`
+	Rate            float64 `validate:"gte=0"`
 }
 
 // New returns a new instance of Config.
@@ -287,8 +286,8 @@ func newClientSet(config Config) (*kubernetes.Clientset, ctrlclient.Client) {
 	if err != nil {
 		log.WithError(err).Panic("failed to build config")
 	}
-	kconfig.QPS = 100
-	kconfig.Burst = 200
+	kconfig.QPS = 1000
+	kconfig.Burst = 2000
 	clientset, err := kubernetes.NewForConfig(kconfig)
 	if err != nil {
 		log.WithError(err).Panic("failed to create clientset")

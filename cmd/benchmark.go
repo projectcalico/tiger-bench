@@ -188,64 +188,51 @@ func main() {
 	}
 }
 
-func cleanupNamespace(ctx context.Context, clients config.Clients, testConfig *config.TestConfig) error {
+func cleanupNamespace(ctx context.Context, clients config.Clients, testConfig *config.TestConfig) {
 	log.Debug("entering cleanupNamespace function")
 	if !testConfig.LeaveStandingConfig {
 		// Clean up all the resources we might have created, apart from the namespace, which might have external service config in it
 		err := utils.DeleteDeploymentsWithPrefix(ctx, clients, testConfig.TestNamespace, "standing-deployment")
 		if err != nil {
 			log.WithError(err).Fatal("failed to delete standing-deployment")
-			return err
 		}
 		err = utils.DeleteDeploymentsWithPrefix(ctx, clients, testConfig.TestNamespace, "standing-svc")
 		if err != nil {
 			log.WithError(err).Fatal("failed to delete standing-svc")
-			return err
-
 		}
 		err = utils.DeleteServicesWithPrefix(ctx, clients, testConfig.TestNamespace, "standing-svc")
 		if err != nil {
 			log.WithError(err).Fatal("failed to delete standing-svc")
-			return err
-
 		}
 		err = utils.DeleteDeploymentsWithPrefix(ctx, clients, testConfig.TestNamespace, "ttfr-test-")
 		if err != nil {
 			log.WithError(err).Fatal("failed to delete ttfr deployments")
-			return err
 		}
 		err = utils.DeleteServicesWithPrefix(ctx, clients, testConfig.TestNamespace, "iperf-srv")
 		if err != nil {
 			log.WithError(err).Fatal("failed to delete iperf-srv")
-			return err
 		}
 		err = utils.DeleteServicesWithPrefix(ctx, clients, testConfig.TestNamespace, "qperf-srv")
 		if err != nil {
 			log.WithError(err).Fatal("failed to delete qperf-srv")
-			return err
 		}
 		err = utils.DeletePodsWithLabel(ctx, clients, testConfig.TestNamespace, "app=iperf")
 		if err != nil {
 			log.WithError(err).Fatal("failed to delete iperf pods")
-			return err
 		}
 		err = utils.DeletePodsWithLabel(ctx, clients, testConfig.TestNamespace, "app=qperf")
 		if err != nil {
 			log.WithError(err).Fatal("failed to delete qperf pods")
-			return err
 		}
 		err = utils.DeletePodsWithLabel(ctx, clients, testConfig.TestNamespace, "app=ttfr")
 		if err != nil {
 			log.WithError(err).Fatal("failed to delete ttfr pods")
-			return err
 		}
 		err = utils.DeleteNetPolsInNamespace(ctx, clients, testConfig.TestNamespace)
 		if err != nil {
 			log.WithError(err).Fatal("failed to delete netpols")
-			return err
 		}
 	}
-	return nil
 }
 
 func writeResultToFile(filename string, results []results.Result) (err error) {

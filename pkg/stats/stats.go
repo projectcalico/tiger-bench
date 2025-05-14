@@ -87,14 +87,15 @@ type MinMaxAvg struct {
 
 // ResultSummary holds a statistical summary of a set of results
 type ResultSummary struct {
-	Min     float64 `json:"min,omitempty"`
-	Max     float64 `json:"max,omitempty"`
-	Average float64 `json:"avg,omitempty"`
-	P50     float64 `json:"P50,omitempty"`
-	P75     float64 `json:"P75,omitempty"`
-	P90     float64 `json:"P90,omitempty"`
-	P99     float64 `json:"P99,omitempty"`
-	Unit    string  `json:"unit,omitempty"`
+	Min           float64 `json:"min,omitempty"`
+	Max           float64 `json:"max,omitempty"`
+	Average       float64 `json:"avg,omitempty"`
+	P50           float64 `json:"P50,omitempty"`
+	P75           float64 `json:"P75,omitempty"`
+	P90           float64 `json:"P90,omitempty"`
+	P99           float64 `json:"P99,omitempty"`
+	Unit          string  `json:"unit,omitempty"`
+	NumDataPoints int     `json:"datapoints,omitempty"`
 }
 
 // SummarizeResults summarizes the results
@@ -102,6 +103,7 @@ func SummarizeResults(results []float64) (ResultSummary, error) {
 	log.Debug("Entering summarizeResults function")
 	var err error
 	summary := ResultSummary{}
+	summary.NumDataPoints = len(results)
 	if len(results) == 0 {
 		log.Warning("No results to summarize")
 		return summary, fmt.Errorf("no results to summarize")
