@@ -89,6 +89,7 @@ func TestSummarizeResults(t *testing.T) {
 				P75:     4,
 				P90:     5,
 				P99:     5,
+				NumDataPoints: 5,
 			},
 			err: false,
 		},
@@ -103,6 +104,7 @@ func TestSummarizeResults(t *testing.T) {
 				P75:     -2,
 				P90:     -1,
 				P99:     -1,
+				NumDataPoints: 5,
 			},
 			err: false,
 		},
@@ -117,6 +119,7 @@ func TestSummarizeResults(t *testing.T) {
 				P75:     2,
 				P90:     4,
 				P99:     4,
+				NumDataPoints: 5,
 			},
 			err: false,
 		},
@@ -131,6 +134,7 @@ func TestSummarizeResults(t *testing.T) {
 				P75:     0,
 				P90:     0,
 				P99:     0,
+				NumDataPoints: 0,
 			},
 			err: true,
 		},
@@ -145,6 +149,7 @@ func TestSummarizeResults(t *testing.T) {
 				P75:     42,
 				P90:     42,
 				P99:     42,
+				NumDataPoints: 1,
 			},
 			err: false,
 		},
@@ -158,13 +163,14 @@ func TestSummarizeResults(t *testing.T) {
 			} else {
 				assert.NoError(t, recderr)
 			}
-			assert.InDelta(t, tt.expected.Min, result.Min, 0.0001)
-			assert.InDelta(t, tt.expected.Max, result.Max, 0.0001)
+			assert.Equal(t, tt.expected.Min, result.Min)
+			assert.Equal(t, tt.expected.Max, result.Max)
 			assert.InDelta(t, tt.expected.Average, result.Average, 0.0001)
-			assert.InDelta(t, tt.expected.P50, result.P50, 0.0001)
-			assert.InDelta(t, tt.expected.P75, result.P75, 0.0001)
-			assert.InDelta(t, tt.expected.P90, result.P90, 0.0001)
-			assert.InDelta(t, tt.expected.P99, result.P99, 0.0001)
+			assert.Equal(t, tt.expected.P50, result.P50)
+			assert.Equal(t, tt.expected.P75, result.P75)
+			assert.Equal(t, tt.expected.P90, result.P90)
+			assert.Equal(t, tt.expected.P99, result.P99)
+			assert.Equal(t, tt.expected.NumDataPoints, result.NumDataPoints)
 		})
 	}
 }

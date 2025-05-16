@@ -20,6 +20,7 @@ import (
 	"github.com/projectcalico/tiger-bench/pkg/dnsperf"
 	"github.com/projectcalico/tiger-bench/pkg/iperf"
 	"github.com/projectcalico/tiger-bench/pkg/qperf"
+	"github.com/projectcalico/tiger-bench/pkg/ttfr"
 	// "github.com/projectcalico/tiger-bench/pkg/stats"
 )
 
@@ -29,7 +30,7 @@ type Result struct {
 	ClusterDetails cluster.Details   `json:"ClusterDetails"`
 	// CalicoNodeCPU    stats.MinMaxAvg      `json:"CalicoNodeCPU,omitempty"`
 	// CalicoNodeMemory stats.MinMaxAvg      `json:"CalicoNodeMemory,omitempty"`
-	TTFR    map[string]string    `json:"ttfr,omitempty"`
+	TTFR    []*ttfr.ResultSummary  `json:"ttfr,omitempty"`
 	IPerf   *iperf.ResultSummary `json:"iperf,omitempty"`
 	QPerf   *qperf.ResultSummary `json:"thruput-latency,omitempty"`
 	DNSPerf *dnsperf.Results     `json:"dnsperf,omitempty"`

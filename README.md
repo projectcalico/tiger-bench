@@ -108,11 +108,23 @@ A list of test run definitions are provided as [`testconfig.yaml`](testconfig.ya
   dataplane: bpf
   iterations: 1
   leaveStandingConfig: true
+- testKind: ttfr
+  numPolicies: 100
+  numServices: 10
+  numPods: 7
+  duration: 60
+  hostNetwork: false
+  iterations: 1
+  leaveStandingConfig: false
+  TestNamespace: testns2
+  TTFRConfig:
+    TestPodsPerNode: 53
+    Rate: 2.5
 ```
 
 There are 2 tests requested in this example config.
 
-`testKind` is required - at present you can only ask for `"thruput-latency"`.
+`testKind` is required - at present you can only ask for `"thruput-latency"` or `ttfr`
 
 `numPolicies`, `numServices`, `numPods` specify the standing config desired for this test. Standing config exists simply to "load" the cluster up with config, they do not take any active part in the tests themselves. The number that you can create is limited by your cluster - you cannot create more standing pods than will fit on your cluster!
 
@@ -142,6 +154,19 @@ If `external=true`, you must also supply `ExternalIPOrFQDN`, `TestPort` and `Con
 Note that the tool will NOT expose the services for you, because there are too many different ways to expose services to the world. You will need to expose pods with the label `app: qperf` in the test namespace to the world for this test to work. An example of exposing these pods using NodePorts can be found in `external_service_example.yaml`.  If you wanted to change that to use a LoadBalancer, simply change `type: NodePort` to `type: LoadBalancer`.
 
 For `thruput-latency` tests, you will need to expose 2 ports from those pods: A TCP `TestPort` and a `ControlPort`. You must not map the port numbers between the pod and the external service, but they do NOT need to be consecutive.  i.e. if you specify TestPort=32221, the pod will listen on port 32221 and whatever method you use to expose that service to the outside world must also use that port number.
+
+A `ttfr` test may have the following additional config:
+
+```
+  TTFRConfig:
+    TestPodsPerNode: 80
+    Rate: 2.5
+```
+The `TestPodsPerNode` setting controls the number of pods it will try to set up on each test node
+
+The `Rate` is the rate at which it will send requests to set up pods, in pods per second.  Note that the acheivable rate depends on a number of things, including the TestPodsPerNode setting (since it cannot set up more than TestPodsPerNode multiplied by the number of nodes with the test label, the tool will stall if all the permitted pods are in the process of starting or terminating).  And that will depend on the speed of the kubernetes control plane, kubelet, etc.
+
+In the event that you ask for a rate higher than the tool can acheive, it will run at the maximum rate it can, while logging warnings that it is "unable to keep up with rate".  If the problem is running out of pod slots, it will log that also, and you can fix it by either increasing the pods per node or giving more nodes the test label.
 
 ### Settings which can reconfigure your cluster
 
@@ -306,3 +331,94 @@ An example result from a "thruput-latency" test might look like:
 `config` contains the configuration requested in the test definition.
 `ClusterDetails` contains information collected about the cluster at the time of the test.
 `thruput-latency` contains a statistical summary of the raw qperf results - latency and throughput for a direct pod-pod test and via a service. Units are given in the result.
+
+
+### The "Time To First Response" test
+
+This "time to first response" (TTFR) test spins up a server pod on each node in the cluster, and then spins up client pods on each node in the cluster.  The client pods start and send requests to the server pod, and record the amount of time it takes before they get a response.  This is sometimes[1] a useful proxy for how long its taking for Calico to program the rules for that pod (since pods start with a deny-all rule and calico-node must program the correct rules before it can talk to anything).  A better measure of the time it takes Calico to program rules for pods is to look in the [Felix Prometheus metrics](https://docs.tigera.io/calico/latest/reference/felix/prometheus#common-data-plane-metrics) at the `felix_int_dataplane_apply_time_seconds` statistic.
+
+[1] if `linuxPolicySetupTimeoutSeconds` is set in the CalicoNetworkSpec in the Installation resource, then pod startup will be delayed until policy is applied. This can be handy if your application pod wants its first request to always succeed. This is a Calico-specific feature that is not part of the CNI spec.  See the [Calico documentation](https://docs.tigera.io/calico/latest/reference/configure-cni-plugins#enabling-policy-setup-timeout) for more information on this feature and how to enable it.
+
+For a "ttfr" test, the tool will:
+
+- Create a test namespace
+- Create a deployment of `numPods` pods that are unrelated to the test and apply `numPolicies` policies to them (standing pods and policies).
+- Create another deployment of 10 pods, and create `numServices` that point to those 10 pods.
+- Wait for those to come up.
+- Create a server pod on each node with the `tigera.io/test-nodepool=default-pool` label
+- Loop round:
+    - creating test pods on those nodes, at the rate defined by Rate in the test config
+    - test pods are then checked until they produce a ttfr result in their log, which is read by the tool
+    - and a delete is sent for the test pod.
+- ttfr results are recorded
+- Collate results and compute min/max/average/50/75/90/99th percentiles
+- Output that summary into a JSON format results file.
+- Optionally delete the test namespace (which will cause all test resources within it to be deleted)
+- Wait for everything to finish being cleaned up.
+
+This test measures Time to First Response in seconds.  i.e. the time between a pod starting up, and it getting a response from a server pod on the same node.
+
+An example result from a "ttfr" test might look like:
+```
+[
+  {
+    "config": {
+      "TestKind": "ttfr",
+      "Encap": "",
+      "Dataplane": "",
+      "NumPolicies": 100,
+      "NumServices": 10,
+      "NumPods": 7,
+      "HostNetwork": false,
+      "TestNamespace": "testns2",
+      "Iterations": 1,
+      "Duration": 60,
+      "DNSPerf": null,
+      "Perf": null,
+      "TTFRConfig": {
+        "TestPodsPerNode": 80,
+        "Rate": 10
+      },
+      "CalicoNodeCPULimit": "",
+      "LeaveStandingConfig": false
+    },
+    "ClusterDetails": {
+      "Cloud": "unknown",
+      "Provisioner": "kubeadm",
+      "NodeType": "linux",
+      "NodeOS": "Ubuntu 20.04.6 LTS",
+      "NodeKernel": "5.15.0-1081-gcp",
+      "NodeArch": "amd64",
+      "NumNodes": 3,
+      "Dataplane": "bpf",
+      "IPFamily": "ipv4",
+      "Encapsulation": "VXLANCrossSubnet",
+      "WireguardEnabled": false,
+      "Product": "calico",
+      "CalicoVersion": "v3.30.0-0.dev-852-g389eae30ae5d",
+      "K8SVersion": "v1.32.4",
+      "CRIVersion": "containerd://1.7.27",
+      "CNIOption": "Calico"
+    },
+    "ttfr": [
+      {
+        "ttfrSummary": {
+          "min": 0.001196166,
+          "max": 0.01283499,
+          "avg": 0.0033952200330330333,
+          "P50": 0.002893934,
+          "P75": 0.003768213,
+          "P90": 0.005621623,
+          "P99": 0.011158944,
+          "unit": "seconds",
+          "datapoints": 333
+        }
+      }
+    ]
+  }
+]
+```
+
+`config` contains the configuration requested in the test definition.
+`ClusterDetails` contains information collected about the cluster at the time of the test.
+`ttfr` contains a statistical summary of the raw results. Units are given in the result.
