@@ -105,22 +105,25 @@ func patchFelixConfig(ctx context.Context, clients config.Clients, testConfig co
 	// patching felixconfig to use DNS policy mode
 	log.Infof("Patching felixconfig to use %s dnspolicymode", dnsPolicyMode)
 	v3PolicyMode := v3.DNSPolicyModeNoDelay
-	if dnsPolicyMode == "DelayDNSResponse" {
-		v3PolicyMode = v3.DNSPolicyModeDelayDNSResponse
-	} else if dnsPolicyMode == "DelayDeniedPacket" {
-		v3PolicyMode = v3.DNSPolicyModeDelayDeniedPacket
-	}
-	// Waiting on the API repo update to add this.
-	/* else if dnsPolicyMode == "Inline" {
-		v3PolicyMode = v3.DNSPolicyModeInline
-	} */
-	if testConfig.Dataplane == "iptables" {
+	v3BPFDNSPolicyMode := v3.BPFDNSPolicyModeNoDelay
+	if testConfig.Dataplane == config.DataPlaneIPTables {
+		if dnsPolicyMode == "DelayDNSResponse" {
+			v3PolicyMode = v3.DNSPolicyModeDelayDNSResponse
+		} else if dnsPolicyMode == "DelayDeniedPacket" {
+			v3PolicyMode = v3.DNSPolicyModeDelayDeniedPacket
+		} else if dnsPolicyMode == "Inline" {
+			v3PolicyMode = v3.DNSPolicyModeInline
+		}
 		felixconfig.Spec.DNSPolicyMode = &v3PolicyMode
+	} else if testConfig.Dataplane == config.DataPlaneBPF {
+		if dnsPolicyMode == "Inline" {
+			v3BPFDNSPolicyMode = v3.BPFDNSPolicyModeInline
+		}
+		if dnsPolicyMode == "NoDelay" {
+			v3BPFDNSPolicyMode = v3.BPFDNSPolicyModeNoDelay
+		}
+		felixconfig.Spec.BPFDNSPolicyMode = &v3BPFDNSPolicyMode
 	}
-	// Waiting on the API repo update to add this.
-	/* else if testConfig.Dataplane == "bpf" {
-		felixconfig.Spec.BPFDNSPolicyMode = &v3PolicyMode
-	} */
 	err = clients.CtrlClient.Update(ctx, felixconfig)
 
 	return err
