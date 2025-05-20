@@ -60,7 +60,8 @@ func ConfigureCluster(ctx context.Context, cfg config.Config, clients config.Cli
 	} else if testConfig.Dataplane == config.DataPlaneNftables {
 		err = enableNftables(ctx, clients)
 		if err != nil {
-			return fmt.Errorf("failed to enable Nftables")
+			log.WithError(err).Error("failed to enable nftables")
+			return fmt.Errorf("failed to enable nftables")
 		}
 	} else if testConfig.Dataplane == config.DataPlaneUnset {
 		log.Info("No dataplane specified, using whatever is already set")
@@ -105,22 +106,25 @@ func patchFelixConfig(ctx context.Context, clients config.Clients, testConfig co
 	// patching felixconfig to use DNS policy mode
 	log.Infof("Patching felixconfig to use %s dnspolicymode", dnsPolicyMode)
 	v3PolicyMode := v3.DNSPolicyModeNoDelay
-	if dnsPolicyMode == "DelayDNSResponse" {
-		v3PolicyMode = v3.DNSPolicyModeDelayDNSResponse
-	} else if dnsPolicyMode == "DelayDeniedPacket" {
-		v3PolicyMode = v3.DNSPolicyModeDelayDeniedPacket
-	}
-	// Waiting on the API repo update to add this.
-	/* else if dnsPolicyMode == "Inline" {
-		v3PolicyMode = v3.DNSPolicyModeInline
-	} */
-	if testConfig.Dataplane == "iptables" {
+	v3BPFDNSPolicyMode := v3.BPFDNSPolicyModeNoDelay
+	if testConfig.Dataplane == config.DataPlaneIPTables {
+		if dnsPolicyMode == "DelayDNSResponse" {
+			v3PolicyMode = v3.DNSPolicyModeDelayDNSResponse
+		} else if dnsPolicyMode == "DelayDeniedPacket" {
+			v3PolicyMode = v3.DNSPolicyModeDelayDeniedPacket
+		} else if dnsPolicyMode == "Inline" {
+			v3PolicyMode = v3.DNSPolicyModeInline
+		}
 		felixconfig.Spec.DNSPolicyMode = &v3PolicyMode
+	} else if testConfig.Dataplane == config.DataPlaneBPF {
+		if dnsPolicyMode == "Inline" {
+			v3BPFDNSPolicyMode = v3.BPFDNSPolicyModeInline
+		}
+		if dnsPolicyMode == "NoDelay" {
+			v3BPFDNSPolicyMode = v3.BPFDNSPolicyModeNoDelay
+		}
+		felixconfig.Spec.BPFDNSPolicyMode = &v3BPFDNSPolicyMode
 	}
-	// Waiting on the API repo update to add this.
-	/* else if testConfig.Dataplane == "bpf" {
-		felixconfig.Spec.BPFDNSPolicyMode = &v3PolicyMode
-	} */
 	err = clients.CtrlClient.Update(ctx, felixconfig)
 
 	return err
@@ -200,7 +204,7 @@ func SetCalicoNodeCPULimit(ctx context.Context, clients config.Clients, limit st
 		// we're not going to return an error here, since the pods will eventually restart, just slower
 	}
 
-	err = waitForTigeraStatus(ctx, clients)
+	err = waitForTigeraStatus(ctx, clients, 600)
 	if err != nil {
 		log.WithError(err).Error("error waiting for tigera status")
 		return err
@@ -352,6 +356,8 @@ func GetClusterDetails(ctx context.Context, clients config.Clients) (Details, er
 		details.Dataplane = "iptables"
 	} else if *installation.Status.Computed.CalicoNetwork.LinuxDataplane == "VPP" {
 		details.Dataplane = "vpp"
+	} else if *installation.Status.Computed.CalicoNetwork.LinuxDataplane == "Nftables" {
+		details.Dataplane = "nftables"
 	} else {
 		details.Dataplane = "unknown"
 	}

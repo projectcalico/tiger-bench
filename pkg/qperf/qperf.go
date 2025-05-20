@@ -365,6 +365,12 @@ func makeQperfPod(nodename string, namespace string, podname string, image strin
 						"-lp",
 						controlPortStr,
 					},
+					Ports: []corev1.ContainerPort{
+						{
+							Name:          "control",
+							ContainerPort: int32(port),
+						},
+					},
 				},
 			},
 			NodeName:      nodename,

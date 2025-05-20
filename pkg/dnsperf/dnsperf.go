@@ -19,7 +19,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,6 +28,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/projectcalico/tiger-bench/pkg/config"
+	"github.com/projectcalico/tiger-bench/pkg/stats"
 	"github.com/projectcalico/tiger-bench/pkg/utils"
 
 	v3 "github.com/tigera/api/pkg/apis/projectcalico/v3"
@@ -49,8 +49,8 @@ type CurlResult struct {
 
 // Results holds the results from this test
 type Results struct {
-	LookupTime      map[int]float64 // will be a set of percentiles
-	ConnectTime     map[int]float64 // will be a set of percentiles
+	LookupTime      stats.ResultSummary
+	ConnectTime     stats.ResultSummary
 	DuplicateSYN    int
 	DuplicateSYNACK int
 	FailedCurls     int
@@ -113,62 +113,83 @@ func MakeDNSPolicy(namespace string, name string, numDomains int) v3.NetworkPoli
 }
 
 // RunDNSPerfTests runs a DNS performance test
-func RunDNSPerfTests(ctx context.Context, clients config.Clients, testDuration int, namespace string, webServerImage string, perfImage string) (*Results, error) {
+func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *config.TestConfig, webServerImage string, perfImage string) (*Results, error) {
 
 	var results Results
 	log.Debug("entering RunDNSPerfTests function")
-	// setup a deployment to scale up and down repeatedly (to eat felix cpu)
-	scaleDep, err := utils.GetOrCreateDeployment(ctx, clients,
-		makeDeployment(
-			namespace,
-			"dnsscale",
-			int32(0),
-			false,
-			[]string{"default-pool"},
-			webServerImage,
-			[]string{"sh", "-c", "while true; do echo `date`: MARK; sleep 10; done"},
-		),
-	)
-	if err != nil {
-		return &results, err
-	}
-	// setup test pods (daemonset)
-	testpods, err := DeployDNSPerfPods(ctx, clients, false, "dnsperf", namespace, perfImage)
-	if err != nil {
-		return &results, err
-	}
-	// setup tcpdump on nodes (deploy network tools as host-networked daemonset, figure out main interface, run tcpdump)
-	tcpdumppods, err := DeployDNSPerfPods(ctx, clients, true, "tcpdump", namespace, perfImage)
-	if err != nil {
-		return &results, err
-	}
-	// setup target pods
-	for i := 0; i < 4; i++ {
-		thisname := fmt.Sprintf("headless%d", i)
-		_, err = utils.GetOrCreateDeployment(ctx, clients,
+	var scaleDep appsv1.Deployment
+	if testConfig.DNSPerf.RunStress {
+		// setup a deployment to scale up and down repeatedly (to eat felix cpu)
+		var err error
+		scaleDep, err = utils.GetOrCreateDeployment(ctx, clients,
 			makeDeployment(
-				namespace,
-				thisname,
-				int32(25),
+				testConfig.TestNamespace,
+				"dnsscale",
+				int32(0),
 				false,
-				[]string{"infrastructure"},
+				[]string{"default-pool"},
 				webServerImage,
-				[]string{},
+				[]string{"sh", "-c", "while true; do echo `date`: MARK; sleep 10; done"},
 			),
 		)
 		if err != nil {
 			return &results, err
 		}
 	}
-
-	_, err = utils.WaitForTestPods(ctx, clients, namespace, "app=dnsperf")
+	// setup test pods (daemonset)
+	testpods, err := DeployDNSPerfPods(ctx, clients, false, "dnsperf", testConfig.TestNamespace, perfImage)
+	if err != nil {
+		return &results, err
+	}
+	// setup tcpdump on nodes (deploy network tools as host-networked daemonset, figure out main interface, run tcpdump)
+	tcpdumppods, err := DeployDNSPerfPods(ctx, clients, true, "tcpdump", testConfig.TestNamespace, perfImage)
+	if err != nil {
+		return &results, err
+	}
+	// setup target pods
+	thisname := fmt.Sprintf("headless%d", 0)
+	_, err = utils.GetOrCreateDeployment(ctx, clients,
+		makeDeployment(
+			testConfig.TestNamespace,
+			thisname,
+			int32(testConfig.DNSPerf.NumTargetPods),
+			false,
+			[]string{"infrastructure"},
+			webServerImage,
+			[]string{},
+		),
+	)
 	if err != nil {
 		return &results, err
 	}
 
-	testdomains, err := getPodFQDNs(ctx, clients, namespace)
+	_, err = utils.WaitForTestPods(ctx, clients, testConfig.TestNamespace, "app=dnsperf")
 	if err != nil {
 		return &results, err
+	}
+
+    var testdomains []string
+	if testConfig.DNSPerf.TargetType == "pod" {
+		log.Info("Using pod FQDNs as targets")
+		testdomains, err = getPodFQDNs(ctx, clients, testConfig.TestNamespace)
+		if err != nil {
+			return &results, err
+		}
+	} else {
+		log.Info("Using service FQDNs as targets")
+		svcs := corev1.ServiceList{}
+		err := clients.CtrlClient.List(ctx, &svcs, ctrlclient.InNamespace(testConfig.TestNamespace))
+		if err != nil {
+			log.WithError(err).Error("failed to list services")
+			return &results, err
+		}
+		for _, svc := range svcs.Items {
+			testdomains = append(testdomains, fmt.Sprintf("%s.%s.svc.cluster.local", svc.Name, testConfig.TestNamespace))
+		}
+	}
+	if len(testdomains) == 0 {
+		log.Info("No test domains found, skipping test")
+		return &results, fmt.Errorf("no test domains found")
 	}
 
 	err = checkTestPods(ctx, clients, testpods)
@@ -176,13 +197,13 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testDuration i
 		return &results, err
 	}
 
-	testctx, cancel := context.WithTimeout(ctx, time.Duration(testDuration)*time.Second)
+	testctx, cancel := context.WithTimeout(ctx, time.Duration(testConfig.Duration)*time.Second)
 	defer cancel()
 	log.Debugf("Created test context: %+v", testctx)
 	// kick off per-node threads to run tcpdump
 	for i, pod := range tcpdumppods {
 		go func() {
-			err = runTCPDump(testctx, clients, &pod, testpods[i], testDuration+60)
+			err = runTCPDump(testctx, clients, &pod, testpods[i], testConfig.Duration+60)
 			if err != nil {
 				log.WithError(err).Error("failed to run tcpdump")
 			}
@@ -190,7 +211,9 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testDuration i
 	}
 	log.Info("tcpdump threads started")
 
-	go scaleDeploymentLoop(testctx, clients, scaleDep, int32(24), 10*time.Second)
+	if testConfig.DNSPerf.RunStress {
+		go scaleDeploymentLoop(testctx, clients, scaleDep, int32(24), 10*time.Second)
+	}
 
 	// kick off per-node threads to run curl commands
 	var rawresults []CurlResult
@@ -209,12 +232,12 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testDuration i
 					// Since Connectime includes LookupTime, we need to subtract LookupTime from ConnectTime to get the actual connect time
 					result.ConnectTime = result.ConnectTime - result.LookupTime
 				}
-				log.Infof("appending result: %+v", result)
-				rawresults = append(rawresults, result)
 				if testctx.Err() != nil {
-					// Probably ctx expiry or cancellation
+					// Probably ctx expiry or cancellation, don't append result in this case
 					break
 				}
+				log.Debugf("appending result: %+v", result)
+				rawresults = append(rawresults, result)
 				log.Debugf("current test context: %+v", testctx)
 				i++
 			}
@@ -222,7 +245,7 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testDuration i
 	}
 	wg.Wait()
 
-	log.Infof("rawresults: %+v", rawresults)
+	log.Debugf("rawresults: %+v", rawresults)
 	results = processResults(rawresults)
 
 	// add up the duplicate SYN numbers from each tcpdump pod
@@ -261,8 +284,8 @@ func getPodFQDNs(ctx context.Context, clients config.Clients, namespace string) 
 func processResults(rawresults []CurlResult) Results {
 	log.Debug("entering processResults function")
 	results := Results{
-		LookupTime:      map[int]float64{},
-		ConnectTime:     map[int]float64{},
+		LookupTime:      stats.ResultSummary{},
+		ConnectTime:     stats.ResultSummary{},
 		DuplicateSYN:    0,
 		FailedCurls:     0,
 		SuccessfulCurls: 0,
@@ -284,19 +307,19 @@ func processResults(rawresults []CurlResult) Results {
 			results.FailedCurls++
 		}
 	}
-	sort.Float64s(lookupTimes)
-	sort.Float64s(connectTimes)
-
-	// Now we have sorted slices, we can calculate percentiles by picking the value at the appropriate index
-	// (e.g. if we had 100 results, the 50th percentile would be the value at index 50, etc.)
-	percentiles := []int{50, 75, 90, 95, 99}
-	results.LookupTime = make(map[int]float64)
-	results.ConnectTime = make(map[int]float64)
-	for _, p := range percentiles {
-		results.LookupTime[p] = lookupTimes[int(float64(p)/100*float64(len(lookupTimes)))]
-		log.Infof("lookupTime: %d percentile: %f", p, results.LookupTime[p])
-		results.ConnectTime[p] = connectTimes[int(float64(p)/100*float64(len(connectTimes)))]
-		log.Infof("connectTime: %d percentile: %f", p, results.ConnectTime[p])
+	if len(lookupTimes) == 0 {
+		log.Info("No successful curls, skipping percentiles")
+		return results
+	}
+	var err error
+	results.LookupTime, err = stats.SummarizeResults(lookupTimes)
+	if err != nil {
+		log.WithError(err).Error("failed to summarize lookup times")
+		return results
+	}
+	results.ConnectTime, err = stats.SummarizeResults(connectTimes)
+	if err != nil {
+		log.WithError(err).Error("failed to summarize connect times")
 	}
 	return results
 }
@@ -311,7 +334,7 @@ func runDNSPerfTest(ctx context.Context, srcPod *corev1.Pod, target string) (Cur
 	result.Target = target
 	result.Success = true
 	cmdfrag := `curl -m 8 -w '{"time_lookup": %{time_namelookup}, "time_connect": %{time_connect}}\n' -s -o /dev/null`
-	cmd := fmt.Sprintf("%s %s", cmdfrag, target)
+	cmd := fmt.Sprintf("%s %s:8080", cmdfrag, target)
 	stdout, _, err := utils.ExecCommandInPod(ctx, srcPod, cmd, 10)
 	if err != nil {
 		log.WithError(err).Error("failed to run curl command")
@@ -376,7 +399,7 @@ func runTCPDump(ctx context.Context, clients config.Clients, pod *corev1.Pod, te
 	log.Infof("nic=%s", nic)
 
 	// run tcpdump command until timeout
-	cmd = fmt.Sprintf(`tcpdump -s0 -w dump.cap -i %s port 80`, nic)
+	cmd = fmt.Sprintf(`tcpdump -s0 -w dump.cap -i %s port 8080`, nic)
 	var out string
 	out, _, err = utils.ExecCommandInPod(ctx, pod, cmd, timeout+30)
 	if err != nil {
@@ -403,7 +426,7 @@ func countDuplicateSYN(ctx context.Context, pod *corev1.Pod) (int, int, error) {
 			log.Info("tcpdump file was truncated, ignoring")
 			return processTCPDumpOutput(stdout)
 		} else {
-			log.Infof("Hit error running command, retrying: %s", stderr)
+			log.WithError(err).Infof("Hit error running command %s, retrying.  stderr: %s stdout: %s", cmd, stderr, stdout)
 		}
 		time.Sleep(1 * time.Second)
 	}
@@ -517,6 +540,7 @@ func makeDNSPerfPod(nodename string, namespace string, podname string, image str
 						"sh", "-c",
 						"while true; do echo `date`: MARK; sleep 10; done",
 					},
+					ImagePullPolicy: "Always",
 				},
 			},
 			NodeName:      nodename,
