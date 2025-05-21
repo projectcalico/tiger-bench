@@ -4,7 +4,7 @@ on:
   push:
 
 env:
-  GO_VERSION: 1.23.6
+  GO_VERSION: 1.24.3
 
 jobs:
   test:
@@ -20,15 +20,15 @@ jobs:
         run: go mod download
       - name: Build
         run: go build -v ./...
-      - name: Test
-        run: go test -v ./...
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.60
+          version: v1.64.8
+      - name: Test
+        run: go test -v ./...
   deploy:
     needs: test
-    if: ${{ success() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-') || startsWith(github.ref, 'refs/tags/v')) }}
+    if: ${{ success() }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -38,6 +38,8 @@ jobs:
             image: quay.io/tigeradev/tiger-bench-perf
           - dockerfile: ./images/nginx/Dockerfile
             image: quay.io/tigeradev/tiger-bench-nginx
+          - dockerfile: ./images/ttfr/Dockerfile
+            image: quay.io/tigeradev/tiger-bench-ttfr
           - dockerfile: ./Dockerfile
             image: quay.io/tigeradev/tiger-bench
     permissions:

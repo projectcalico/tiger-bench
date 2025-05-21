@@ -15,14 +15,20 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/assert"
+
+	log "github.com/sirupsen/logrus"
 )
 
 func TestHTTPTarget_Ping(t *testing.T) {
@@ -143,7 +149,6 @@ func Test_noPushGW(t *testing.T) {
 		t.Fatal(err)
 	}
 	basicEnv := []envVar{
-		{key: "PROM_GATEWAYS", value: ""},
 		{key: "ADDRESS", value: host},
 		{key: "PORT", value: port},
 		{key: "QUIT_AFTER", value: "1"},
@@ -160,7 +165,57 @@ func Test_noPushGW(t *testing.T) {
 			t.Setenv(envvar.key, envvar.value)
 		}
 		t.Run(tt.name, func(t *testing.T) {
+			// run main and capture logs from it
+			var str bytes.Buffer
+			log.SetOutput(&str)
+
 			main()
+
+			capturedLogs := str.String()
+			if capturedLogs == "" {
+				t.Errorf("Expected logs to be captured, but got none")
+			}
+			assert.Contains(t, capturedLogs, "ttfr_seconds")
+			r := regexp.MustCompile(`{\\"ttfr_seconds\\": ([0-9].*\.[0-9].*)}`)
+			matches := r.FindStringSubmatch(capturedLogs)
+			if len(matches) < 2 {
+				t.Errorf("Expected regex to match, but didn't get enough matches: %v from %v", matches, capturedLogs)
+			}
+			ttfrString := matches[1]
+			if len(ttfrString) == 0 {
+				t.Errorf("Expected regex to match, but got none")
+			}
+			ttfrSec, err := strconv.ParseFloat(ttfrString, 64)
+			if err != nil {
+				t.Errorf("Expected to parse float, but got error: %v", err)
+			}
+			if ttfrSec == 0 {
+				t.Errorf("Expected ttfrSec to be non-zero, but got %v", ttfrSec)
+			}
 		})
+	}
+}
+
+func Test_regex(t *testing.T) {
+	capturedLogs := "time=\"2025-05-02T14:04:07+01:00\" level=info msg=\"Pingo started at 2025-05-02 14:04:07.029670625 +0100 BST m=+0.000956863\"\ntime=\"2025-05-02T14:04:07+01:00\" level=info msg=\"Response status code 200 protocol tcp\"\ntime=\"2025-05-02T14:04:07+01:00\" level=info msg=\"Response status code 200 protocol tcp\"\ntime=\"2025-05-02T14:04:07+01:00\" level=info msg=\"TTFR found: was 0.016565863\"\ntime=\"2025-05-02T14:04:07+01:00\" level=info msg=\"Started everything!\"\ntime=\"2025-05-02T14:04:07+01:00\" level=info msg=\"Starting connectivity check to &{0xc00021c5a0 http://127.0.0.1:40379 tcp 0xc0002001e0 0xc000200300 false} rate 1\"\ntime=\"2025-05-02T14:04:07+01:00\" level=info msg=\"Response status code 200 protocol tcp\"\ntime=\"2025-05-02T14:04:07+01:00\" level=info msg=\"{\\\"ttfr_seconds\\\": 0.016565863}\"\n"
+	r := regexp.MustCompile(`{\\"ttfr_seconds\\": ([0-9].*\.[0-9].*)}`)
+	matches := r.FindStringSubmatch(capturedLogs)
+	if len(matches) < 2 {
+		t.Errorf("Expected regex to match, but didn't get enough matches: %v", matches)
+	}
+	ttfrString := matches[1]
+	if ttfrString == "" {
+		t.Error("Expected regex to match, but got none")
+	}
+	ttfrSec, err := strconv.ParseFloat(ttfrString, 64)
+	if err != nil {
+		t.Errorf("Expected to parse float, but got error: %v", err)
+	}
+	if ttfrSec == 0 {
+		t.Errorf("Expected ttfrSec to be non-zero, but got %v", ttfrSec)
+	}
+	// Check if the ttfrSec is within a reasonable range
+	if ttfrSec != 0.016565863 {
+		t.Errorf("Expected ttfrSec to be 0.016565863, but got %v", ttfrSec)
 	}
 }

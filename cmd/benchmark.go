@@ -33,6 +33,7 @@ import (
 	"github.com/projectcalico/tiger-bench/pkg/policy"
 	"github.com/projectcalico/tiger-bench/pkg/qperf"
 	"github.com/projectcalico/tiger-bench/pkg/results"
+	"github.com/projectcalico/tiger-bench/pkg/ttfr"
 	"github.com/projectcalico/tiger-bench/pkg/utils"
 )
 
@@ -69,6 +70,8 @@ func main() {
 		if err != nil {
 			log.WithError(err).Fatal("failed to configure cluster")
 		}
+		defer cleanupNamespace(ctx, clients, testConfig)
+
 		err = cluster.SetupStandingConfig(ctx, clients, *testConfig, testConfig.TestNamespace, cfg.WebServerImage)
 		if err != nil {
 			log.WithError(err).Fatal("failed to setup standing config on cluster")
@@ -135,39 +138,30 @@ func main() {
 				log.WithError(err).Error("failed to run dnsperf tests")
 			}
 			log.Infof("dnsperf results: %v", thisResult.DNSPerf)
+		case config.TestKindTTFR:
+			var ttfrResultsList []*ttfr.Results
+			// Apply standing policy (that applies to both server and test pods)
+			err := policy.CreateTestPolicy(ctx, clients, testPolicyName, testConfig.TestNamespace, []int{8080})
+			if err != nil {
+				log.WithError(err).Fatal("failed to create ttfr test policy")
+			}
+			log.Info("Running ttfr tests, Iterations=", testConfig.Iterations)
+			for j := 0; j < testConfig.Iterations; j++ {
+				ttfrResult, err := ttfr.RunTTFRTest(ctx, clients, testConfig, cfg)
+				if err != nil {
+					log.WithError(err).Error("failed to get ttfr results")
+					continue
+				}
+				ttfrResultsList = append(ttfrResultsList, &ttfrResult)
+			}
+			if len(ttfrResultsList) > 0 {
+				thisResult.TTFR, err = ttfr.SummarizeResults(ttfrResultsList)
+				if err != nil {
+					log.WithError(err).Error("failed to summarize ttfr results")
+				}
+			}
 		default:
 			log.Fatal("test type unknown")
-		}
-		if !testConfig.LeaveStandingConfig {
-			// Clean up all the resources we might have created, apart from the namespace, which might have external service config in it
-			err = utils.DeleteDeployment(ctx, clients, testConfig.TestNamespace, "standing-deployment")
-			if err != nil {
-				log.WithError(err).Fatal("failed to delete standing-deployment")
-			}
-			err = utils.DeleteDeployment(ctx, clients, testConfig.TestNamespace, "standing-svc")
-			if err != nil {
-				log.WithError(err).Fatal("failed to delete standing-svc")
-			}
-			err = utils.DeleteServicesWithPrefix(ctx, clients, testConfig.TestNamespace, "standing-svc")
-			if err != nil {
-				log.WithError(err).Fatal("failed to delete standing-svc")
-			}
-			err = utils.DeleteServicesWithPrefix(ctx, clients, testConfig.TestNamespace, "iperf-srv")
-			if err != nil {
-				log.WithError(err).Fatal("failed to delete iperf-srv")
-			}
-			err = utils.DeleteServicesWithPrefix(ctx, clients, testConfig.TestNamespace, "qperf-srv")
-			if err != nil {
-				log.WithError(err).Fatal("failed to delete qperf-srv")
-			}
-			err = utils.DeletePodsWithLabel(ctx, clients, testConfig.TestNamespace, "app=iperf")
-			if err != nil {
-				log.WithError(err).Fatal("failed to delete iperf pods")
-			}
-			err = utils.DeletePodsWithLabel(ctx, clients, testConfig.TestNamespace, "app=qperf")
-			if err != nil {
-				log.WithError(err).Fatal("failed to delete qperf pods")
-			}
 		}
 		// If we set the CPU limit, unset it again.
 		if testConfig.CalicoNodeCPULimit != "" {
@@ -194,11 +188,59 @@ func main() {
 	}
 }
 
+func cleanupNamespace(ctx context.Context, clients config.Clients, testConfig *config.TestConfig) {
+	log.Debug("entering cleanupNamespace function")
+	if !testConfig.LeaveStandingConfig {
+		// Clean up all the resources we might have created, apart from the namespace, which might have external service config in it
+		err := utils.DeleteDeploymentsWithPrefix(ctx, clients, testConfig.TestNamespace, "standing-deployment")
+		if err != nil {
+			log.WithError(err).Fatal("failed to delete standing-deployment")
+		}
+		err = utils.DeleteDeploymentsWithPrefix(ctx, clients, testConfig.TestNamespace, "standing-svc")
+		if err != nil {
+			log.WithError(err).Fatal("failed to delete standing-svc")
+		}
+		err = utils.DeleteServicesWithPrefix(ctx, clients, testConfig.TestNamespace, "standing-svc")
+		if err != nil {
+			log.WithError(err).Fatal("failed to delete standing-svc")
+		}
+		err = utils.DeleteDeploymentsWithPrefix(ctx, clients, testConfig.TestNamespace, "ttfr-test-")
+		if err != nil {
+			log.WithError(err).Fatal("failed to delete ttfr deployments")
+		}
+		err = utils.DeleteServicesWithPrefix(ctx, clients, testConfig.TestNamespace, "iperf-srv")
+		if err != nil {
+			log.WithError(err).Fatal("failed to delete iperf-srv")
+		}
+		err = utils.DeleteServicesWithPrefix(ctx, clients, testConfig.TestNamespace, "qperf-srv")
+		if err != nil {
+			log.WithError(err).Fatal("failed to delete qperf-srv")
+		}
+		err = utils.DeletePodsWithLabel(ctx, clients, testConfig.TestNamespace, "app=iperf")
+		if err != nil {
+			log.WithError(err).Fatal("failed to delete iperf pods")
+		}
+		err = utils.DeletePodsWithLabel(ctx, clients, testConfig.TestNamespace, "app=qperf")
+		if err != nil {
+			log.WithError(err).Fatal("failed to delete qperf pods")
+		}
+		err = utils.DeletePodsWithLabel(ctx, clients, testConfig.TestNamespace, "app=ttfr")
+		if err != nil {
+			log.WithError(err).Fatal("failed to delete ttfr pods")
+		}
+		err = utils.DeleteNetPolsInNamespace(ctx, clients, testConfig.TestNamespace)
+		if err != nil {
+			log.WithError(err).Fatal("failed to delete netpols")
+		}
+	}
+}
+
 func writeResultToFile(filename string, results []results.Result) (err error) {
 	log.Debug("entering writeResultToFile function")
 	file, err := os.Create(filename)
 	if err != nil {
-		return fmt.Errorf("failed to open output file: %s", filename)
+		log.WithError(err).Errorf("failed to open output file: %s", filename)
+		return err
 	}
 	defer func() {
 		closeErr := file.Close()
@@ -208,11 +250,13 @@ func writeResultToFile(filename string, results []results.Result) (err error) {
 	}()
 	output, err := json.MarshalIndent(results, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal results: %s", err)
+		log.WithError(err).Errorf("failed to marshal results: %s", err)
+		return err
 	}
 	_, err = file.Write(output)
 	if err != nil {
-		return fmt.Errorf("failed to write results to file: %s", err)
+		log.WithError(err).Errorf("failed to write results to file: %s", err)
+		return err
 	}
 	return nil
 }

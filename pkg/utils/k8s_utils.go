@@ -31,12 +31,14 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/remotecommand"
+	"k8s.io/kubernetes/pkg/client/conditions"
 )
 
 // ExecCommandInPod executes a command in a pod
@@ -214,6 +216,30 @@ func DeleteServicesWithPrefix(ctx context.Context, clients config.Clients, names
 	return nil
 }
 
+// DeleteNetPolsInNamespace deletes network policies in a namespace
+func DeleteNetPolsInNamespace(ctx context.Context, clients config.Clients, namespace string) error {
+	log.Debug("Entering DeleteNetPolInNamespace function")
+	netpols := &networkingv1.NetworkPolicyList{}
+	err := clients.CtrlClient.List(ctx, netpols, ctrlclient.InNamespace(namespace))
+	if err != nil {
+		log.WithError(err).Error("failed to list network policies")
+		return err
+	}
+	for _, netpol := range netpols.Items {
+		log.Debug("Deleting network policy: ", netpol.Name)
+		err = clients.CtrlClient.Delete(ctx, &netpol)
+		if err != nil {
+			if ctrlclient.IgnoreNotFound(err) == nil {
+				log.Infof("didn't find existing network policy %s", netpol.Name)
+			} else {
+				log.WithError(err).Errorf("failed to delete network policy %v", netpol.Name)
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // GetOrCreateDeployment gets or creates a deployment if it does not exist
 func GetOrCreateDeployment(ctx context.Context, clients config.Clients, deployment appsv1.Deployment) (appsv1.Deployment, error) {
 	log.Debug("Entering GetOrCreateDeployment function")
@@ -237,18 +263,30 @@ func GetOrCreateDeployment(ctx context.Context, clients config.Clients, deployme
 	return deployment, nil
 }
 
-// DeleteDeployment deletes a deployment, ignoring if it didn't exist
-func DeleteDeployment(ctx context.Context, clients config.Clients, namespace string, deploymentName string) error {
-	log.Debug("Entering DeleteDeployment function")
-	err := clients.CtrlClient.Delete(ctx, &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: deploymentName, Namespace: namespace}})
+// DeleteDeploymentsWithPrefix deletes deployments, starting with a prefix
+func DeleteDeploymentsWithPrefix(ctx context.Context, clients config.Clients, namespace string, deploymentName string) error {
+	log.Debug("Entering DeleteDeploymentsWithPrefix function")
+	deployments := appsv1.DeploymentList{}
+	err := clients.CtrlClient.List(ctx, &deployments, ctrlclient.InNamespace(namespace))
 	if err != nil {
-		if ctrlclient.IgnoreNotFound(err) == nil {
-			log.Infof("didn't find existing deployment %s", deploymentName)
-			return nil
-		}
-		log.WithError(err).Error("failed to delete deployment")
+		log.WithError(err).Error("failed to list deployments")
+		return err
 	}
-	return err
+	for _, deployment := range deployments.Items {
+		if strings.HasPrefix(deployment.Name, deploymentName) {
+			log.Debug("Deleting deployment: ", deployment.Name)
+			err = clients.CtrlClient.Delete(ctx, &deployment)
+			if err != nil {
+				if ctrlclient.IgnoreNotFound(err) == nil {
+					log.Infof("didn't find existing deployment %s", deployment.Name)
+				} else {
+					log.WithError(err).Errorf("failed to delete deployment %v", deployment.Name)
+					return err
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // GetOrCreateDS gets or creates a deployment if it does not exist
@@ -408,4 +446,41 @@ func ScaleDeployment(ctx context.Context, clients config.Clients, deployment app
 		return err
 	}
 	return nil
+}
+
+// GetPodLogs retrieves logs from a pod
+func GetPodLogs(ctx context.Context, clients config.Clients, podName string, namespace string) (string, error) {
+	log.Debug("Entering GetPodLogs function")
+	podLogOpts := corev1.PodLogOptions{}
+	req := clients.Clientset.CoreV1().Pods(namespace).GetLogs(podName, &podLogOpts)
+	logs, err := req.Stream(ctx)
+	if err != nil {
+		log.WithError(err).Error("failed to get pod logs")
+		return "", err
+	}
+	defer logs.Close()
+	buf := new(bytes.Buffer)
+	_, err = buf.ReadFrom(logs)
+	if err != nil {
+		log.WithError(err).Error("failed to read pod logs")
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+// IsPodRunning checks if a pod is running
+func IsPodRunning(ctx context.Context, clients config.Clients, pod *corev1.Pod) (bool, error) {
+	log.Debug("Entering isPodRunning function")
+	pod, err := clients.Clientset.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
+	if err != nil {
+		return false, err
+	}
+
+	switch pod.Status.Phase {
+	case corev1.PodRunning:
+		return true, nil
+	case corev1.PodFailed, corev1.PodSucceeded:
+		return false, conditions.ErrPodCompleted
+	}
+	return false, nil
 }

@@ -30,6 +30,7 @@ import (
 	"golang.org/x/net/proxy"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/yaml"
@@ -59,7 +60,7 @@ type Config struct {
 	LogLevel        string `envconfig:"LOG_LEVEL" default:"info"`
 	WebServerImage  string `envconfig:"WEBSERVER_IMAGE" default:"quay.io/tigeradev/tiger-bench-nginx:latest"`
 	PerfImage       string `envconfig:"PERF_IMAGE" default:"quay.io/tigeradev/tiger-bench-perf:latest"`
-	TTFRImage       string `envconfig:"TTFR_IMAGE" default:"quay.io/tigeradev/ttfr:latest"`
+	TTFRImage       string `envconfig:"TTFR_IMAGE" default:"quay.io/tigeradev/tiger-bench-ttfr:latest"`
 	TestConfigs     testConfigs
 }
 
@@ -80,6 +81,7 @@ const (
 	TestKindDNSPerf TestKind = "dnsperf"
 	TestKindIperf   TestKind = "iperf"
 	TestKindQperf   TestKind = "thruput-latency"
+	TestKindTTFR    TestKind = "ttfr"
 )
 
 // Encap represents the encapsulation type to use.
@@ -118,7 +120,7 @@ const (
 
 // TestConfig represents a test to run on a cluster, and the configuration for the test.
 type TestConfig struct {
-	TestKind            TestKind  `validate:"required,oneof=dnsperf iperf thruput-latency"`
+	TestKind            TestKind  `validate:"required,oneof=dnsperf iperf thruput-latency ttfr"`
 	Encap               Encap     `validate:"omitempty,oneof=none vxlan ipip"`
 	Dataplane           DataPlane `validate:"omitempty,oneof=iptables bpf nftables"`
 	NumPolicies         int       `validate:"gte=0"`
@@ -130,6 +132,7 @@ type TestConfig struct {
 	Duration            int         `default:"60"`
 	DNSPerf             *DNSConfig  `validate:"required_if=TestKind dnsperf"`
 	Perf                *PerfConfig `validate:"required_if=TestType thruput-latency,required_if=TestType iperf"`
+	TTFRConfig          *TTFRConfig `validate:"required_if=TestType ttfr"`
 	CalicoNodeCPULimit  string
 	LeaveStandingConfig bool
 }
@@ -148,6 +151,12 @@ type PerfConfig struct {
 type DNSConfig struct {
 	NumDomains int         `validate:"gte=0"`
 	Mode       DNSPerfMode `validate:"omitempty,oneof=Inline NoDelay DelayDeniedPacket DelayDNSResponse"`
+}
+
+// TTFRConfig contains the configuration specific to TTFR tests.
+type TTFRConfig struct {
+	TestPodsPerNode int     `validate:"gte=0"`
+	Rate            float64 `validate:"gte=0"`
 }
 
 // New returns a new instance of Config.
@@ -278,14 +287,18 @@ func newClientSet(config Config) (*kubernetes.Clientset, ctrlclient.Client) {
 	if err != nil {
 		log.WithError(err).Panic("failed to build config")
 	}
-	kconfig.QPS = 100
-	kconfig.Burst = 200
+	kconfig.QPS = 1000
+	kconfig.Burst = 2000
 	clientset, err := kubernetes.NewForConfig(kconfig)
 	if err != nil {
 		log.WithError(err).Panic("failed to create clientset")
 	}
 
 	scheme := runtime.NewScheme()
+	err = networkingv1.AddToScheme(scheme)
+	if err != nil {
+		log.WithError(err).Panic("failed to add networkingv1 to scheme")
+	}
 	err = operatorv1.AddToScheme(scheme)
 	if err != nil {
 		log.WithError(err).Panic("failed to add operatorv1 to scheme")

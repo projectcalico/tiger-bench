@@ -143,7 +143,8 @@ func enableBPF(ctx context.Context, cfg config.Config, clients config.Clients) e
 	defer cancel()
 	err := clients.CtrlClient.Get(childCtx, ctrlclient.ObjectKey{Name: "default"}, installation)
 	if err != nil {
-		return fmt.Errorf("failed to get installation")
+		log.WithError(err).Error("failed to get installation")
+		return err
 	}
 	if *installation.Spec.CalicoNetwork.LinuxDataplane == operatorv1.LinuxDataplaneBPF {
 		log.Info("BPF already enabled")
@@ -156,7 +157,8 @@ func enableBPF(ctx context.Context, cfg config.Config, clients config.Clients) e
 		kubesvc := &corev1.Endpoints{}
 		err := clients.CtrlClient.Get(childCtx, ctrlclient.ObjectKey{Name: "kubernetes", Namespace: "default"}, kubesvc)
 		if err != nil {
-			return fmt.Errorf("failed to get kubernetes service endpoints")
+			log.WithError(err).Error("failed to get kubernetes service endpoints")
+			return err
 		}
 		log.Infof("first kubernetes service endpoint IP is %v", kubesvc.Subsets[0].Addresses[0].IP)
 		log.Infof("first kubernetes service endpoint port is %v", kubesvc.Subsets[0].Ports[0].Port)
@@ -170,7 +172,8 @@ func enableBPF(ctx context.Context, cfg config.Config, clients config.Clients) e
 	// if it doesn't exist already, create configMap with k8s endpoint data in it
 	err = createOrUpdateCM(childCtx, clients, host, port)
 	if err != nil {
-		return fmt.Errorf("failed to create or update configMap")
+		log.WithError(err).Error("failed to create or update configMap")
+		return err
 	}
 
 	// kubectl patch ds -n kube-system kube-proxy -p '{"spec":{"template":{"spec":{"nodeSelector":{"non-calico": "true"}}}}}'
@@ -179,13 +182,15 @@ func enableBPF(ctx context.Context, cfg config.Config, clients config.Clients) e
 	log.Debug("Getting kube-proxy ds")
 	err = clients.CtrlClient.Get(childCtx, ctrlclient.ObjectKey{Namespace: "kube-system", Name: "kube-proxy"}, proxyds)
 	if err != nil {
-		return fmt.Errorf("failed to get kube-proxy ds")
+		log.WithError(err).Error("failed to get kube-proxy ds")
+		return err
 	}
 	log.Debugf("patching with %v", string(patch[:]))
 	log.Info("enabling BPF dataplane")
 	err = clients.CtrlClient.Patch(childCtx, proxyds, ctrlclient.RawPatch(ctrlclient.Merge.Type(), patch))
 	if err != nil {
-		return fmt.Errorf("failed to patch kube-proxy ds")
+		log.WithError(err).Error("failed to patch kube-proxy ds")
+		return err
 	}
 
 	// kubectl patch installation.operator.tigera.io default --type merge -p '{"spec":{"calicoNetwork":{"linuxDataplane":"BPF"}}}'
@@ -195,16 +200,19 @@ func enableBPF(ctx context.Context, cfg config.Config, clients config.Clients) e
 	log.Debug("Getting installation")
 	err = clients.CtrlClient.Get(childCtx, ctrlclient.ObjectKey{Name: "default"}, installation)
 	if err != nil {
-		return fmt.Errorf("failed to get installation")
+		log.WithError(err).Error("failed to get installation")
+		return err
 	}
 	log.Debugf("patching with %v", string(patch[:]))
 	err = clients.CtrlClient.Patch(childCtx, installation, ctrlclient.RawPatch(ctrlclient.Merge.Type(), patch))
 	if err != nil {
-		return fmt.Errorf("failed to patch installation")
+		log.WithError(err).Error("failed to patch installation")
+		return err
 	}
 	err = waitForTigeraStatus(ctx, clients)
 	if err != nil {
-		return fmt.Errorf("error waiting for tigera status")
+		log.WithError(err).Error("error waiting for tigera status")
+		return err
 	}
 	return nil
 }
@@ -218,7 +226,8 @@ func enableIptables(ctx context.Context, clients config.Clients) error {
 	log.Debug("Getting installation")
 	err := clients.CtrlClient.Get(childCtx, ctrlclient.ObjectKey{Name: "default"}, installation)
 	if err != nil {
-		return fmt.Errorf("failed to get installation")
+		log.WithError(err).Error("failed to get installation")
+		return err
 	}
 	if *installation.Spec.CalicoNetwork.LinuxDataplane == operatorv1.LinuxDataplaneIptables {
 		log.Info("IPtables already enabled")
@@ -232,13 +241,15 @@ func enableIptables(ctx context.Context, clients config.Clients) error {
 	log.Debug("Getting installation")
 	err = clients.CtrlClient.Get(childCtx, ctrlclient.ObjectKey{Name: "default"}, installation)
 	if err != nil {
-		return fmt.Errorf("failed to get installation")
+		log.WithError(err).Error("failed to get installation")
+		return err
 	}
 	log.Debugf("patching with %v", string(patch[:]))
 	log.Info("enabling iptables dataplane")
 	err = clients.CtrlClient.Patch(childCtx, installation, ctrlclient.RawPatch(ctrlclient.Merge.Type(), patch))
 	if err != nil {
-		return fmt.Errorf("failed to patch installation")
+		log.WithError(err).Error("failed to patch installation")
+		return err
 	}
 
 	// kubectl patch ds -n kube-system kube-proxy --type merge -p '{"spec":{"template":{"spec":{"nodeSelector":{"non-calico": null}}}}}'
@@ -247,17 +258,20 @@ func enableIptables(ctx context.Context, clients config.Clients) error {
 	log.Debug("Getting kube-proxy ds")
 	err = clients.CtrlClient.Get(childCtx, ctrlclient.ObjectKey{Namespace: "kube-system", Name: "kube-proxy"}, proxyds)
 	if err != nil {
-		return fmt.Errorf("failed to get kube-proxy ds")
+		log.WithError(err).Error("failed to get kube-proxy ds")
+		return err
 	}
 	log.Debugf("patching with %v", string(patch[:]))
 	err = clients.CtrlClient.Patch(childCtx, proxyds, ctrlclient.RawPatch(ctrlclient.Merge.Type(), patch))
 	if err != nil {
-		return fmt.Errorf("failed to patch kube-proxy ds")
+		log.WithError(err).Error("failed to patch kube-proxy ds")
+		return err
 	}
 
 	err = waitForTigeraStatus(ctx, clients)
 	if err != nil {
-		return fmt.Errorf("error waiting for tigera status")
+		log.WithError(err).Error("error waiting for tigera status")
+		return err
 	}
 	return nil
 }
@@ -307,11 +321,13 @@ func waitForTigeraStatus(ctx context.Context, clients config.Clients) error {
 		time.Sleep(10 * time.Second)
 		err := clients.CtrlClient.Get(childCtx, ctrlclient.ObjectKey{Name: "apiserver"}, apiStatus)
 		if err != nil {
-			return fmt.Errorf("failed to get apiserver status")
+			log.WithError(err).Error("failed to get apiserver status")
+			return err
 		}
 		err = clients.CtrlClient.Get(childCtx, ctrlclient.ObjectKey{Name: "calico"}, calicoStatus)
 		if err != nil {
-			return fmt.Errorf("failed to get calico status")
+			log.WithError(err).Error("failed to get calico status")
+			return err
 		}
 		for _, apiCondition := range apiStatus.Status.Conditions {
 			log.Debugf("apiserver condition: %v", apiCondition)
@@ -342,21 +358,24 @@ func updateEncap(ctx context.Context, cfg config.Config, clients config.Clients,
 		patch = []byte(`{"spec":{"ipipMode":"Never","vxlanMode":"Never"}}`)
 		err = patchInstallation(ctx, clients, "None")
 		if err != nil {
-			return fmt.Errorf("failed to patch installation")
+			log.WithError(err).Error("failed to patch installation")
+			return err
 		}
 	} else if encap == config.EncapIPIP {
 		// kubectl patch ippool default-ipv4-ippool -p '{"spec": {"ipipMode": "Always"}, {vxlanMode: "Never"}}'
 		patch = []byte(`{"spec":{"ipipMode":"Always","vxlanMode":"Never"}}`)
 		err = patchInstallation(ctx, clients, "IPIP")
 		if err != nil {
-			return fmt.Errorf("failed to patch installation")
+			log.WithError(err).Error("failed to patch installation")
+			return err
 		}
 	} else if encap == config.EncapVXLAN {
 		// kubectl patch ippool default-ipv4-ippool -p '{"spec": {"ipipMode": "Never"}, {vxlanMode: "Always"}}'
 		patch = []byte(`{"spec":{"ipipMode":"Never","vxlanMode":"Always"}}`)
 		err = patchInstallation(ctx, clients, "VXLAN")
 		if err != nil {
-			return fmt.Errorf("failed to patch installation")
+			log.WithError(err).Error("failed to patch installation")
+			return err
 		}
 	} else if encap == config.EncapUnset {
 		log.Info("No encapsulation specified, using whatever is already set")
@@ -368,12 +387,14 @@ func updateEncap(ctx context.Context, cfg config.Config, clients config.Clients,
 		log.Debug("Calico version is less than v3.28.0, patching IPPool")
 		err = patchIPPool(ctx, clients, patch)
 		if err != nil {
-			return fmt.Errorf("failed to patch IPPool")
+			log.WithError(err).Error("failed to patch IPPool")
+			return err
 		}
 	}
 	err = waitForTigeraStatus(ctx, clients)
 	if err != nil {
-		return fmt.Errorf("error waiting for tigera status")
+		log.WithError(err).Error("error waiting for tigera status")
+		return err
 	}
 	return nil
 }
@@ -392,7 +413,8 @@ func patchInstallation(ctx context.Context, clients config.Clients, encap string
 	installation := &operatorv1.Installation{}
 	err := clients.CtrlClient.Get(ctx, ctrlclient.ObjectKey{Name: "default"}, installation)
 	if err != nil {
-		return fmt.Errorf("failed to get installation")
+		log.WithError(err).Error("failed to get installation")
+		return err
 	}
 	log.Debug("installation is", installation)
 	installation.Spec.CalicoNetwork.IPPools[0].Encapsulation = v1encap

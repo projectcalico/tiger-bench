@@ -79,7 +79,7 @@ func (t *HTTPTarget) Ping() error {
 		method = http.MethodHead
 		url = t.url
 	case "http":
-		// randomly generate method, status for the request with equal likely hood for all status listed
+		// randomly generate method, status for the request with equal likelihood for all status listed
 		method = httpRequestMethods[rand.Intn(len(httpRequestMethods))]
 		status := httpStatusCodes[rand.Intn(len(httpStatusCodes))]
 		// creates a distribution for user agents, %d = 5 more likely than %d = 1
@@ -176,6 +176,7 @@ func CalculateTTFR(target Target) {
 	for {
 		// Do each response on its own goroutine so we can have multiple responses in flight.
 		go func() {
+			log.Info("Sending ping to ", target)
 			err := target.Ping()
 			if err == nil {
 				select {
@@ -262,6 +263,7 @@ func main() {
 	// If adding more, may be worth using https://github.com/kelseyhightower/envconfig.
 	var err error
 	reachableAddr := getEnvParam("ADDRESS", "localhost")
+	log.Info("Using reachable address ", reachableAddr)
 	unreachableAddr := getEnvParam("UNREACHABLE_ADDRESS", "")
 	port := getEnvParam("PORT", "5005")
 	prometheusEndpointsBlob := getEnvParam("PROM_GATEWAYS", "")
@@ -297,6 +299,7 @@ func main() {
 		urlLengthFactor = 1
 	}
 	// If a SLEEPTIME is configured, sleep for that time before starting.
+	log.Info("Sleeping for ", sleepTime, " seconds")
 	if sleepTime > 0 {
 		time.Sleep(time.Duration(sleepTime * float64(time.Second)))
 		startTime = time.Now()
@@ -306,6 +309,7 @@ func main() {
 	// These metrics aren't Prometheus best practice: can/can't reach would be better
 	// distinguished by a label; not label + metric name for example.  Leaving it for
 	// compatibility.
+	log.Info("Setting up Prometheus metrics")
 	registry := prometheus.NewRegistry()
 	reachLabels := prometheus.Labels{
 		"node":           nodeName,
@@ -378,6 +382,7 @@ func main() {
 	var prometheusEndpoints []string
 	var pusher *push.Pusher
 	if prometheusEndpointsBlob != "" {
+		log.Info("Will push results to Prometheus push gateway ", prometheusEndpointsBlob)
 		err = json.Unmarshal([]byte(prometheusEndpointsBlob), &prometheusEndpoints)
 		if err != nil || len(prometheusEndpoints) == 0 {
 			log.Fatal("fatal error ", err, " decoding Prometheus endpoints ", prometheusEndpointsBlob)
@@ -395,6 +400,7 @@ func main() {
 	case "http", "tcp":
 		// Create a non-default HTTP transport that doesn't cache TCP connections
 		// and limits the dial and GET timeout to half the configured total each.
+		log.Info("Setting up HTTP transport")
 		halfTimeout := time.Duration(timeout * float64(time.Second) / 2)
 		transport := &http.Transport{
 			DisableKeepAlives: true,
@@ -420,6 +426,7 @@ func main() {
 			logResponses:   true,
 		}
 	case "udp":
+		log.Info("Setting up UDP transport")
 		reachTarget = &UDPTarget{
 			url:            fmt.Sprintf("%s:%s", reachableAddr, port),
 			sentMetric:     numPings,
@@ -434,34 +441,35 @@ func main() {
 	}
 
 	if reachableAddr != "" {
+		log.Info("Starting connectivity check to ", reachableAddr, ":", port, " rate ", connRate)
 		CalculateTTFR(reachTarget)
 		go CheckConnectivity(reachTarget, connRate, quitAfter)
 	}
 
 	if unreachableAddr != "" {
+		log.Info("Starting connectivity check to ", unreachableAddr, ":", port, " rate ", failRate)
 		go CheckConnectivity(failTarget, failRate, quitAfter)
 	}
 
 	log.Info("Started everything!")
 	// Report to Prometheus every 10 seconds.
-	if prometheusEndpointsBlob != "" {
-		DoEvery(func() {
+	gather, err := registry.Gather()
+	if err != nil {
+		log.Fatal("error gathering metrics: ", err)
+	}
+	for _, metric := range gather {
+		if *metric.Name == "ttfr_seconds" {
+			log.Info(`{"ttfr_seconds": `, *metric.Metric[0].Gauge.Value, "}")
+		}
+	}
+	DoEvery(func() {
+		if prometheusEndpointsBlob != "" {
 			err = pusher.Push()
 			if err != nil {
 				log.Fatal("error pushing response success update to gateway: ", err)
 			}
-		}, 10*time.Second, quitAfter)
-	} else {
-		gather, err := registry.Gather()
-		for _, metric := range gather {
-			if *metric.Name == "ttfr_seconds" {
-				log.Info(`{"ttfr_seconds": `, *metric.Metric[0].Gauge.Value, "}")
-			}
 		}
-		if err != nil {
-			log.Fatal("error gathering metrics: ", err)
-		}
-	}
+	}, 10*time.Second, quitAfter)
 }
 
 func randString(n int) string {

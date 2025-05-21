@@ -1,4 +1,4 @@
-ARG GO_VERSION=1.24.0
+ARG GO_VERSION=1.24.3
 
 FROM golang:${GO_VERSION} AS builder
 
@@ -8,8 +8,15 @@ COPY pkg pkg
 COPY *.go go.* ./
 
 RUN ls -ltr /benchmark
-RUN go mod download
-RUN GO111MODULE=on CGO_ENABLED=0 GOOS=linux go build cmd/benchmark.go
+RUN --mount=type=cache,target=/go/pkg/mod/ \
+    --mount=type=bind,source=go.sum,target=go.sum \
+    --mount=type=bind,source=go.mod,target=go.mod \
+    go mod download -x
+ENV GOCACHE=/root/.cache/go-build
+RUN --mount=type=cache,target=/go/pkg/mod/ \
+    --mount=type=cache,target="/root/.cache/go-build" \
+    GO111MODULE=on CGO_ENABLED=0 GOOS=linux go build -o /benchmark/benchmark cmd/benchmark.go
+
 RUN mkdir /results
 
 FROM alpine:3.21

@@ -46,11 +46,12 @@ func DeployPolicies(ctx context.Context, clients config.Clients, numPolicies int
 
 	// deploy policies
 	currentNumPolicies, err := countPolicies(ctx, clients, namespace, "policy-")
+	log.Info("Current number of policies: ", currentNumPolicies)
 	if err != nil {
 		return err
 	}
 	if numPolicies > currentNumPolicies {
-		// create policies
+		// If we do not have enough policies, create them
 		podSelector := metav1.LabelSelector{
 			MatchExpressions: []metav1.LabelSelectorRequirement{
 				{Key: "app", Operator: metav1.LabelSelectorOpExists},
@@ -95,12 +96,12 @@ func DeployPolicies(ctx context.Context, clients config.Clients, numPolicies int
 		return overallError
 
 	} else if numPolicies < currentNumPolicies {
-		// delete policies
+		// if we have too many policies, delete some
 		// Spin up a channel with multiple threads to delete policies, because a single thread is limited to 5 per second
 
 		// make a list of ints from currentNumPolicies to numPolicies
 		var policyIndexes []int
-		for i := currentNumPolicies; i > numPolicies; i-- {
+		for i := currentNumPolicies-1; i >= numPolicies; i-- {
 			policyIndexes = append(policyIndexes, i)
 		}
 		var wg sync.WaitGroup
