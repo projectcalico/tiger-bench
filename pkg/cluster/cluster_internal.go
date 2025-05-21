@@ -22,6 +22,7 @@ import (
 
 	"github.com/projectcalico/tiger-bench/pkg/config"
 	"github.com/projectcalico/tiger-bench/pkg/utils"
+	yaml "gopkg.in/yaml.v2"
 
 	"github.com/sethvargo/go-retry"
 	log "github.com/sirupsen/logrus"
@@ -33,6 +34,104 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+func enableNftables(ctx context.Context, clients config.Clients) error {
+	// enable Nftables
+	log.Debug("entering enableNftables function")
+	childCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	installation := &operatorv1.Installation{}
+	log.Debug("Getting installation")
+	err := clients.CtrlClient.Get(childCtx, ctrlclient.ObjectKey{Name: "default"}, installation)
+	if err != nil {
+		return fmt.Errorf("failed to get installation")
+	}
+	if *installation.Spec.CalicoNetwork.LinuxDataplane == operatorv1.LinuxDataplaneNftables {
+		log.Info("Nftables already enabled")
+		return nil
+	}
+
+	// Is this cluster nftable ready?
+	kubecm := &corev1.ConfigMap{}
+	err = clients.CtrlClient.Get(childCtx, ctrlclient.ObjectKey{Namespace: "kube-system", Name: "kube-proxy"}, kubecm)
+	log.Debug("ٰVerifing if kube-proxy config is available")
+	if err != nil {
+		return fmt.Errorf("failed to get proxymode")
+	}
+	configStr, ok := kubecm.Data["config.conf"]
+	if !ok {
+		return fmt.Errorf("config.conf not found in kube-proxy configmap")
+	}
+
+	var configMap map[string]interface{}
+	err = yaml.Unmarshal([]byte(configStr), &configMap)
+	if err != nil {
+		return fmt.Errorf("failed to parse YAML: %w", err)
+	}
+
+	mode, ok := configMap["mode"].(string)
+	if !ok {
+		return fmt.Errorf("mode field not found or not a string")
+	}
+	log.Debug("ٰVerifing if kube-proxy is running in nftables mode")
+	if mode != "nftables" {
+		return fmt.Errorf("kube-proxy mode is not nftables (found: %s)", mode)
+	}
+
+	// kubectl patch installation.operator.tigera.io default --type merge -p '{"spec":{"calicoNetwork":{"linuxDataplane":"Nftables"}}}'
+	patch := []byte(`{"spec":{"calicoNetwork":{"linuxDataplane":"Nftables"}}}`)
+
+	installation = &operatorv1.Installation{}
+	log.Debug("Getting installation")
+	err = clients.CtrlClient.Get(childCtx, ctrlclient.ObjectKey{Name: "default"}, installation)
+	if err != nil {
+		return fmt.Errorf("failed to get installation")
+	}
+	log.Debugf("patching with %v", string(patch[:]))
+	log.Info("enabling Nftables dataplane")
+	err = clients.CtrlClient.Patch(childCtx, installation, ctrlclient.RawPatch(ctrlclient.Merge.Type(), patch))
+	if err != nil {
+		return fmt.Errorf("failed to patch installation")
+	}
+
+	// Nftables bug ?
+	// kubectl patch installation.operator.tigera.io default --type merge -p '{"spec":{"calicoNetwork":{"linuxPolicySetupTimeoutSeconds":null}}}'
+	time.Sleep(1000 * time.Millisecond)
+	patch = []byte(`{"spec":{"calicoNetwork":{"linuxPolicySetupTimeoutSeconds":null}}}`)
+
+	installation = &operatorv1.Installation{}
+	log.Debug("Getting installation to patch linuxPolicySetupTimeoutSeconds")
+	err = clients.CtrlClient.Get(childCtx, ctrlclient.ObjectKey{Name: "default"}, installation)
+	if err != nil {
+		return fmt.Errorf("failed to get installation")
+	}
+	log.Debugf("patching with %v", string(patch[:]))
+	log.Info("Making sure linuxPolicySetupTimeoutSeconds is Null")
+	err = clients.CtrlClient.Patch(childCtx, installation, ctrlclient.RawPatch(ctrlclient.Merge.Type(), patch))
+	if err != nil {
+		return fmt.Errorf("failed to patch installation")
+	}
+
+	// kubectl patch ds -n kube-system kube-proxy --type merge -p '{"spec":{"template":{"spec":{"nodeSelector":{"non-calico": null}}}}}'
+	patch = []byte(`{"spec":{"template":{"spec":{"nodeSelector":{"non-calico": null}}}}}`)
+	proxyds := &appsv1.DaemonSet{}
+	log.Debug("Getting kube-proxy ds")
+	err = clients.CtrlClient.Get(childCtx, ctrlclient.ObjectKey{Namespace: "kube-system", Name: "kube-proxy"}, proxyds)
+	if err != nil {
+		return fmt.Errorf("failed to get kube-proxy ds")
+	}
+	log.Debugf("patching with %v", string(patch[:]))
+	err = clients.CtrlClient.Patch(childCtx, proxyds, ctrlclient.RawPatch(ctrlclient.Merge.Type(), patch))
+	if err != nil {
+		return fmt.Errorf("failed to patch kube-proxy ds")
+	}
+
+	err = waitForTigeraStatus(ctx, clients)
+	if err != nil {
+		return fmt.Errorf("error waiting for tigera status")
+	}
+	return nil
+}
 
 func enableBPF(ctx context.Context, cfg config.Config, clients config.Clients) error {
 	// enable BPF
