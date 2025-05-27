@@ -168,7 +168,7 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 		return &results, err
 	}
 
-    var testdomains []string
+	var testdomains []string
 	if testConfig.DNSPerf.TargetType == "pod" {
 		log.Info("Using pod FQDNs as targets")
 		testdomains, err = getPodFQDNs(ctx, clients, testConfig.TestNamespace)
@@ -200,16 +200,19 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 	testctx, cancel := context.WithTimeout(ctx, time.Duration(testConfig.Duration)*time.Second)
 	defer cancel()
 	log.Debugf("Created test context: %+v", testctx)
-	// kick off per-node threads to run tcpdump
-	for i, pod := range tcpdumppods {
-		go func() {
-			err = runTCPDump(testctx, clients, &pod, testpods[i], testConfig.Duration+60)
-			if err != nil {
-				log.WithError(err).Error("failed to run tcpdump")
-			}
-		}()
+
+	if testConfig.DNSPerf.TestDNSPolicy {
+		// kick off per-node threads to run tcpdump
+		for i, pod := range tcpdumppods {
+			go func() {
+				err = runTCPDump(testctx, clients, &pod, testpods[i], testConfig.Duration+60)
+				if err != nil {
+					log.WithError(err).Error("failed to run tcpdump")
+				}
+			}()
+		}
+		log.Info("tcpdump threads started")
 	}
-	log.Info("tcpdump threads started")
 
 	if testConfig.DNSPerf.RunStress {
 		go scaleDeploymentLoop(testctx, clients, scaleDep, int32(24), 10*time.Second)
@@ -226,15 +229,15 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 			for {
 				domain := testdomains[i%(len(testdomains))]
 				result, err := runDNSPerfTest(testctx, &pod, domain)
+				if testctx.Err() != nil {
+					// Probably ctx expiry or cancellation, don't append result or log errors in this case
+					break
+				}
 				if err != nil {
 					log.WithError(err).Errorf("failed to run curl to %s", domain)
 				} else if result.Success {
 					// Since Connectime includes LookupTime, we need to subtract LookupTime from ConnectTime to get the actual connect time
 					result.ConnectTime = result.ConnectTime - result.LookupTime
-				}
-				if testctx.Err() != nil {
-					// Probably ctx expiry or cancellation, don't append result in this case
-					break
 				}
 				log.Debugf("appending result: %+v", result)
 				rawresults = append(rawresults, result)
@@ -248,15 +251,17 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 	log.Debugf("rawresults: %+v", rawresults)
 	results = processResults(rawresults)
 
-	// add up the duplicate SYN numbers from each tcpdump pod
-	results.DuplicateSYN = 0
-	for _, pod := range tcpdumppods {
-		duplicateSYN, duplicateSYNACK, err := countDuplicateSYN(ctx, &pod)
-		if err != nil {
-			return &results, err
+	if testConfig.DNSPerf.TestDNSPolicy {
+		// add up the duplicate SYN numbers from each tcpdump pod
+		results.DuplicateSYN = 0
+		for _, pod := range tcpdumppods {
+			duplicateSYN, duplicateSYNACK, err := countDuplicateSYN(ctx, &pod)
+			if err != nil {
+				return &results, err
+			}
+			results.DuplicateSYN += duplicateSYN
+			results.DuplicateSYNACK += duplicateSYNACK
 		}
-		results.DuplicateSYN += duplicateSYN
-		results.DuplicateSYNACK += duplicateSYNACK
 	}
 	log.Infof("Results: %+v", results)
 	return &results, nil
@@ -337,7 +342,9 @@ func runDNSPerfTest(ctx context.Context, srcPod *corev1.Pod, target string) (Cur
 	cmd := fmt.Sprintf("%s %s:8080", cmdfrag, target)
 	stdout, _, err := utils.ExecCommandInPod(ctx, srcPod, cmd, 10)
 	if err != nil {
-		log.WithError(err).Error("failed to run curl command")
+		if ctx.Err() == nil {  // Only log error if context is still valid
+			log.WithError(err).Error("failed to run curl command")
+		}
 		result.Success = false
 	} else {
 		err = json.Unmarshal([]byte(stdout), &result)

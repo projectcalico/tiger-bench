@@ -128,7 +128,7 @@ type TestConfig struct {
 	NumPods             int       `validate:"gte=0"`
 	HostNetwork         bool
 	TestNamespace       string      `default:"testns"`
-	Iterations          int         `default:"1" validate:"gte=1"`
+	Iterations          int         `default:"1" validate:"gte=0"`
 	Duration            int         `default:"60"`
 	DNSPerf             *DNSConfig  `validate:"required_if=TestKind dnsperf"`
 	Perf                *PerfConfig `validate:"required_if=TestType thruput-latency,required_if=TestType iperf"`

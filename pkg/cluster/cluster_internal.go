@@ -106,7 +106,7 @@ func enableNftables(ctx context.Context, clients config.Clients) error {
 		return fmt.Errorf("failed to patch kube-proxy ds")
 	}
 
-	err = waitForTigeraStatus(ctx, clients, 900)
+	err = waitForTigeraStatus(ctx, clients, 900, true)
 	if err != nil {
 		return fmt.Errorf("error waiting for tigera status")
 	}
@@ -310,7 +310,7 @@ func enableBPF(ctx context.Context, cfg config.Config, clients config.Clients) e
 		log.WithError(err).Error("failed to patch installation")
 		return err
 	}
-	err = waitForTigeraStatus(ctx, clients, 600)
+	err = waitForTigeraStatus(ctx, clients, 600, true)
 	if err != nil {
 		log.WithError(err).Error("error waiting for tigera status")
 		return err
@@ -377,7 +377,7 @@ func enableIptables(ctx context.Context, clients config.Clients) error {
 		return err
 	}
 
-	err = waitForTigeraStatus(ctx, clients, 900)
+	err = waitForTigeraStatus(ctx, clients, 900, true)
 	if err != nil {
 		log.WithError(err).Error("error waiting for tigera status")
 		return err
@@ -423,7 +423,17 @@ func createOrUpdateCM(ctx context.Context, clients config.Clients, host string, 
 
 }
 
-func waitForTigeraStatus(ctx context.Context, clients config.Clients, timeout int) error {
+func waitForTigeraStatus(ctx context.Context, clients config.Clients, timeout int, deleteCalicoNodePods bool) error {
+
+	if deleteCalicoNodePods {
+		// delete all calico-node pods so they all restart in parallel, since this is going to be slow if they update one-by-one
+		err := utils.DeletePodsWithLabel(ctx, clients, "calico-system", "k8s-app=calico-node")
+		if err != nil {
+			log.Warning("failed to delete calico-node pods")
+			// we're not going to return an error here, since the pods will eventually restart, just slower
+		}
+	}
+
 	// wait for tigera status
 	log.Debug("entering waitForTigeraStatus function")
 	apiStatus := &operatorv1.TigeraStatus{}
@@ -507,7 +517,7 @@ func updateEncap(ctx context.Context, cfg config.Config, clients config.Clients,
 			return err
 		}
 	}
-	err = waitForTigeraStatus(ctx, clients, 600)
+	err = waitForTigeraStatus(ctx, clients, 600, false)
 	if err != nil {
 		log.WithError(err).Error("error waiting for tigera status")
 		return err

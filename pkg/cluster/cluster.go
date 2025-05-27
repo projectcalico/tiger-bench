@@ -197,14 +197,7 @@ func SetCalicoNodeCPULimit(ctx context.Context, clients config.Clients, limit st
 		return err
 	}
 
-	// delete all calico-node pods so they all restart in parallel, since this is going to be slow if they update one-by-one
-	err = utils.DeletePodsWithLabel(ctx, clients, "calico-system", "k8s-app=calico-node")
-	if err != nil {
-		log.Warning("failed to delete calico-node pods")
-		// we're not going to return an error here, since the pods will eventually restart, just slower
-	}
-
-	err = waitForTigeraStatus(ctx, clients, 600)
+	err = waitForTigeraStatus(ctx, clients, 600, true)
 	if err != nil {
 		log.WithError(err).Error("error waiting for tigera status")
 		return err
