@@ -19,11 +19,11 @@ import (
 	"reflect"
 	testing "testing"
 
+	"github.com/projectcalico/tiger-bench/pkg/stats"
+	"github.com/stretchr/testify/require"
 	v3 "github.com/tigera/api/pkg/apis/projectcalico/v3"
 	"github.com/tigera/api/pkg/lib/numorstring"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"github.com/stretchr/testify/require"
-
 )
 
 func TestProcessTCPDumpOutput(t *testing.T) {
@@ -70,7 +70,7 @@ func TestProcessTCPDumpOutput(t *testing.T) {
 	`
 	expectedsyn = 2
 	expectedsynack = 0
-	resultsyn, resultsynack, err= processTCPDumpOutput(input)
+	resultsyn, resultsynack, err = processTCPDumpOutput(input)
 	require.NoError(t, err)
 	if resultsyn != expectedsyn {
 		panic("Unexpected number of duplicate SYN packets")
@@ -245,8 +245,8 @@ func TestProcessResults(t *testing.T) {
 	// Test case 1: Empty input
 	var rawResults []CurlResult
 	expected := Results{
-		LookupTime:      map[int]float64{},
-		ConnectTime:     map[int]float64{},
+		LookupTime:      stats.ResultSummary{},
+		ConnectTime:     stats.ResultSummary{},
 		DuplicateSYN:    0,
 		FailedCurls:     0,
 		SuccessfulCurls: 0,
@@ -279,21 +279,28 @@ func TestProcessResults(t *testing.T) {
 		},
 	}
 	expected = Results{
-		LookupTime: map[int]float64{
-			50: 0.234,
-			75: 0.345,
-			90: 0.345,
-			95: 0.345,
-			99: 0.345,
+		LookupTime: stats.ResultSummary{
+			Min:           0.123,
+			Max:           0.345,
+			Average:       0.23399999999999999,
+			P50:           0.234,
+			P75:           0.345,
+			P90:           0.345,
+			P99:           0.345,
+			NumDataPoints: 3,
 		},
-		ConnectTime: map[int]float64{
-			50: 0.567,
-			75: 0.678,
-			90: 0.678,
-			95: 0.678,
-			99: 0.678,
+		ConnectTime: stats.ResultSummary{
+			Min:           0.456,
+			Max:           0.678,
+			Average:       0.5670000000000001,
+			P50:           0.567,
+			P75:           0.678,
+			P90:           0.678,
+			P99:           0.678,
+			NumDataPoints: 3,
 		},
 		DuplicateSYN:    0,
+		DuplicateSYNACK: 0,
 		FailedCurls:     0,
 		SuccessfulCurls: 3,
 	}
@@ -325,21 +332,28 @@ func TestProcessResults(t *testing.T) {
 		},
 	}
 	expected = Results{
-		LookupTime: map[int]float64{
-			50: 0.234,
-			75: 0.234,
-			90: 0.234,
-			95: 0.234,
-			99: 0.234,
+		LookupTime: stats.ResultSummary{
+			Min:           0.234,
+			Max:           0.234,
+			Average:       0.234,
+			P50:           0.234,
+			P75:           0.234,
+			P90:           0.234,
+			P99:           0.234,
+			NumDataPoints: 1,
 		},
-		ConnectTime: map[int]float64{
-			50: 0.567,
-			75: 0.567,
-			90: 0.567,
-			95: 0.567,
-			99: 0.567,
+		ConnectTime: stats.ResultSummary{
+			Min:           0.567,
+			Max:           0.567,
+			Average:       0.567,
+			P50:           0.567,
+			P75:           0.567,
+			P90:           0.567,
+			P99:           0.567,
+			NumDataPoints: 1,
 		},
 		DuplicateSYN:    0,
+		DuplicateSYNACK: 0,
 		FailedCurls:     2,
 		SuccessfulCurls: 1,
 	}

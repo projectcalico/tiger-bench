@@ -128,7 +128,7 @@ type TestConfig struct {
 	NumPods             int       `validate:"gte=0"`
 	HostNetwork         bool
 	TestNamespace       string      `default:"testns"`
-	Iterations          int         `validate:"gte=0"`
+	Iterations          int         `default:"1" validate:"gte=0"`
 	Duration            int         `default:"60"`
 	DNSPerf             *DNSConfig  `validate:"required_if=TestKind dnsperf"`
 	Perf                *PerfConfig `validate:"required_if=TestType thruput-latency,required_if=TestType iperf"`
@@ -149,8 +149,12 @@ type PerfConfig struct {
 
 // DNSConfig contains the configuration specific to DNSPerf tests.
 type DNSConfig struct {
-	NumDomains int         `validate:"gte=0"`
-	Mode       DNSPerfMode `validate:"omitempty,oneof=Inline NoDelay DelayDeniedPacket DelayDNSResponse"`
+	NumDomains    int         `validate:"gte=0"`
+	Mode          DNSPerfMode `validate:"omitempty,oneof=Inline NoDelay DelayDeniedPacket DelayDNSResponse"`
+	RunStress     bool        `default:"true" validate:"omitempty"`
+	TestDNSPolicy bool        `default:"true" validate:"omitempty"`
+	NumTargetPods int         `default:"100" validate:"gte=1"`
+	TargetType    string      `default:"pod" validate:"omitempty,oneof=pod service"`
 }
 
 // TTFRConfig contains the configuration specific to TTFR tests.
@@ -244,11 +248,8 @@ func defaultAndValidate(cfg *Config) error {
 			tcfg.TestNamespace = "testns"
 		}
 		if tcfg.TestKind == "dnsperf" {
-			if tcfg.DNSPerf.NumDomains == 0 {
-				return fmt.Errorf("non-zero NumDomains is required for a dnsperf test")
-			}
-			if tcfg.DNSPerf.Mode == "" {
-				return fmt.Errorf("Mode is required for a dnsperf test")
+			if tcfg.DNSPerf.NumDomains < 0 {
+				return fmt.Errorf("NumDomains must be non-negative for a dnsperf test")
 			}
 		}
 		if tcfg.TestKind == "thruput-latency" || tcfg.TestKind == "iperf" {

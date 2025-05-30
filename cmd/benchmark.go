@@ -40,12 +40,16 @@ import (
 func main() {
 	log.SetReportCaller(true)
 	log.SetLevel(log.InfoLevel)
-	log.SetFormatter(&log.TextFormatter{
+	customFormatter := &log.TextFormatter{
 		CallerPrettyfier: func(frame *runtime.Frame) (function string, file string) {
 			fileName := path.Base(frame.File) + ":" + strconv.Itoa(frame.Line)
 			return "", fileName
 		},
-	})
+	}
+	customFormatter.TimestampFormat = "2006-01-02 15:04:05.000"
+	customFormatter.FullTimestamp = true
+	log.SetFormatter(customFormatter)
+
 	// get environment variables
 	ctx := context.Background()
 	cfg, clients, err := config.New(ctx)
@@ -129,11 +133,13 @@ func main() {
 				}
 			}
 		case config.TestKindDNSPerf:
-			_, err = policy.GetOrCreateDNSPolicy(ctx, clients, dnsperf.MakeDNSPolicy(testConfig.TestNamespace, testPolicyName, testConfig.DNSPerf.NumDomains))
-			if err != nil {
-				log.WithError(err).Fatal("failed to create dnsperf policy")
+			if testConfig.DNSPerf.TestDNSPolicy {
+				_, err = policy.GetOrCreateDNSPolicy(ctx, clients, dnsperf.MakeDNSPolicy(testConfig.TestNamespace, testPolicyName, testConfig.DNSPerf.NumDomains))
+				if err != nil {
+					log.WithError(err).Fatal("failed to create dnsperf policy")
+				}
 			}
-			thisResult.DNSPerf, err = dnsperf.RunDNSPerfTests(ctx, clients, testConfig.Duration, testConfig.TestNamespace, cfg.WebServerImage, cfg.PerfImage)
+			thisResult.DNSPerf, err = dnsperf.RunDNSPerfTests(ctx, clients, testConfig, cfg.WebServerImage, cfg.PerfImage)
 			if err != nil {
 				log.WithError(err).Error("failed to run dnsperf tests")
 			}
@@ -192,46 +198,56 @@ func cleanupNamespace(ctx context.Context, clients config.Clients, testConfig *c
 	log.Debug("entering cleanupNamespace function")
 	if !testConfig.LeaveStandingConfig {
 		// Clean up all the resources we might have created, apart from the namespace, which might have external service config in it
+		log.Info("Cleaning up namespace: ", testConfig.TestNamespace)
 		err := utils.DeleteDeploymentsWithPrefix(ctx, clients, testConfig.TestNamespace, "standing-deployment")
 		if err != nil {
-			log.WithError(err).Fatal("failed to delete standing-deployment")
+			log.WithError(err).Error("failed to delete standing-deployment")
 		}
 		err = utils.DeleteDeploymentsWithPrefix(ctx, clients, testConfig.TestNamespace, "standing-svc")
 		if err != nil {
-			log.WithError(err).Fatal("failed to delete standing-svc")
+			log.WithError(err).Error("failed to delete standing-svc")
 		}
 		err = utils.DeleteServicesWithPrefix(ctx, clients, testConfig.TestNamespace, "standing-svc")
 		if err != nil {
-			log.WithError(err).Fatal("failed to delete standing-svc")
+			log.WithError(err).Error("failed to delete standing-svc")
 		}
 		err = utils.DeleteDeploymentsWithPrefix(ctx, clients, testConfig.TestNamespace, "ttfr-test-")
 		if err != nil {
-			log.WithError(err).Fatal("failed to delete ttfr deployments")
+			log.WithError(err).Error("failed to delete ttfr deployments")
+		}
+		err = utils.DeleteDeploymentsWithPrefix(ctx, clients, testConfig.TestNamespace, "headless")
+		if err != nil {
+			log.WithError(err).Error("failed to delete headless deployments")
 		}
 		err = utils.DeleteServicesWithPrefix(ctx, clients, testConfig.TestNamespace, "iperf-srv")
 		if err != nil {
-			log.WithError(err).Fatal("failed to delete iperf-srv")
+			log.WithError(err).Error("failed to delete iperf-srv")
 		}
 		err = utils.DeleteServicesWithPrefix(ctx, clients, testConfig.TestNamespace, "qperf-srv")
 		if err != nil {
-			log.WithError(err).Fatal("failed to delete qperf-srv")
+			log.WithError(err).Error("failed to delete qperf-srv")
 		}
 		err = utils.DeletePodsWithLabel(ctx, clients, testConfig.TestNamespace, "app=iperf")
 		if err != nil {
-			log.WithError(err).Fatal("failed to delete iperf pods")
+			log.WithError(err).Error("failed to delete iperf pods")
 		}
 		err = utils.DeletePodsWithLabel(ctx, clients, testConfig.TestNamespace, "app=qperf")
 		if err != nil {
-			log.WithError(err).Fatal("failed to delete qperf pods")
+			log.WithError(err).Error("failed to delete qperf pods")
 		}
 		err = utils.DeletePodsWithLabel(ctx, clients, testConfig.TestNamespace, "app=ttfr")
 		if err != nil {
-			log.WithError(err).Fatal("failed to delete ttfr pods")
+			log.WithError(err).Error("failed to delete ttfr pods")
+		}
+		err = utils.DeletePodsWithLabel(ctx, clients, testConfig.TestNamespace, "app=dnsperf")
+		if err != nil {
+			log.WithError(err).Error("failed to delete dnsperf pods")
 		}
 		err = utils.DeleteNetPolsInNamespace(ctx, clients, testConfig.TestNamespace)
 		if err != nil {
-			log.WithError(err).Fatal("failed to delete netpols")
+			log.WithError(err).Error("failed to delete netpols")
 		}
+		log.Info("Cleanup complete")
 	}
 }
 
