@@ -12,4 +12,5 @@ RUN GO111MODULE=on CGO_ENABLED=0 GOOS=linux go build -o /pingo .
 
 FROM scratch
 COPY --from=builder /pingo /pingo
+USER pingo
 CMD ["/pingo"]

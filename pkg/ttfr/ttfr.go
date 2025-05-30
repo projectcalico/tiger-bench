@@ -303,10 +303,31 @@ func makePod(nodename string, namespace string, podname string, hostnetwork bool
 			Namespace: namespace,
 		},
 		Spec: corev1.PodSpec{
+			AutomountServiceAccountToken: utils.BoolPtr(false),
+			SecurityContext: &corev1.PodSecurityContext{
+				RunAsNonRoot: utils.BoolPtr(true),
+				RunAsGroup:   utils.Int64Ptr(1000),
+				RunAsUser:    utils.Int64Ptr(1000),
+				SeccompProfile: &corev1.SeccompProfile{
+					Type: corev1.SeccompProfileTypeRuntimeDefault,
+				},
+			},
 			Containers: []corev1.Container{
 				{
 					Name:  "ttfr",
 					Image: image,
+					SecurityContext: &corev1.SecurityContext{
+						Privileged:               utils.BoolPtr(false),
+						AllowPrivilegeEscalation: utils.BoolPtr(false),
+						ReadOnlyRootFilesystem:   utils.BoolPtr(false),
+					},
+					Ports: []corev1.ContainerPort{
+						{
+							Name:          "http",
+							ContainerPort: 8080,
+							Protocol:      corev1.ProtocolTCP,
+						},
+					},
 				},
 			},
 			NodeName:      nodename,
@@ -330,6 +351,11 @@ func makeTestPod(nodename string, namespace string, podname string, hostnetwork 
 			Namespace: namespace,
 		},
 		Spec: corev1.PodSpec{
+			SecurityContext: &corev1.PodSecurityContext{
+				RunAsNonRoot: utils.BoolPtr(true),
+				RunAsGroup:   utils.Int64Ptr(1000),
+				RunAsUser:    utils.Int64Ptr(1000),
+			},
 			Containers: []corev1.Container{
 				{
 					Name:  "ttfr",
@@ -346,6 +372,21 @@ func makeTestPod(nodename string, namespace string, podname string, hostnetwork 
 						{
 							Name:  "PROTOCOL",
 							Value: "http",
+						},
+					},
+					SecurityContext: &corev1.SecurityContext{
+						Privileged:               utils.BoolPtr(false),
+						AllowPrivilegeEscalation: utils.BoolPtr(false),
+						ReadOnlyRootFilesystem:   utils.BoolPtr(true),
+						Capabilities: &corev1.Capabilities{
+							Drop: []corev1.Capability{"ALL"},
+						},
+					},
+					Ports: []corev1.ContainerPort{
+						{
+							Name:          "http",
+							ContainerPort: 8080,
+							Protocol:      corev1.ProtocolTCP,
 						},
 					},
 				},
