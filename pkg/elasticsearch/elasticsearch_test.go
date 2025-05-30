@@ -20,24 +20,31 @@ import (
 	"github.com/projectcalico/tiger-bench/pkg/config"
 	"github.com/projectcalico/tiger-bench/pkg/dnsperf"
 	"github.com/projectcalico/tiger-bench/pkg/results"
+	"github.com/projectcalico/tiger-bench/pkg/stats"
 	"github.com/stretchr/testify/require"
 )
 
 func TestCreateESDoc(t *testing.T) {
 	dnsperf := dnsperf.Results{
-		LookupTime: map[int]float64{
-			50: 0.003640,
-			75: 0.004745,
-			90: 0.006914,
-			95: 0.008833,
-			99: 0.013641,
+		LookupTime: stats.ResultSummary{
+			Min:           0.001,
+			Max:           0.013641,
+			Average:       0.004745,
+			P50:           0.003640,
+			P75:           0.004745,
+			P90:           0.006914,
+			P99:           0.013641,
+			NumDataPoints: 17,
 		},
-		ConnectTime: map[int]float64{
-			50: 0.000439,
-			75: 0.000542,
-			90: 0.000880,
-			95: 0.001406,
-			99: 0.003917,
+		ConnectTime: stats.ResultSummary{
+			Min:           0.000239,
+			Max:           0.003917,
+			Average:       0.000542,
+			P50:           0.000439,
+			P75:           0.000542,
+			P90:           0.000880,
+			P99:           0.003917,
+			NumDataPoints: 17,
 		},
 		DuplicateSYN:    101,
 		DuplicateSYNACK: 0,
@@ -54,14 +61,14 @@ func TestCreateESDoc(t *testing.T) {
 			NumPods:            10,
 			CalicoNodeCPULimit: "40m",
 			DNSPerf: &config.DNSConfig{
-			  NumDomains:  0,
-			  Mode:        "Inline",
+				NumDomains: 0,
+				Mode:       "Inline",
 			},
 		},
 		DNSPerf: &dnsperf,
 	}
 
-	expectedDoc := `{"config":{"TestKind":"dnsperf","Encap":"none","Dataplane":"bpf","NumPolicies":30,"NumServices":20,"NumPods":10,"HostNetwork":false,"TestNamespace":"","Iterations":0,"Duration":0,"DNSPerf":{"NumDomains":0,"Mode":"Inline"},"Perf":null,"TTFRConfig":null,"CalicoNodeCPULimit":"40m","LeaveStandingConfig":false},"ClusterDetails":{"Cloud":"","Provisioner":"","NodeType":"","NodeOS":"","NodeKernel":"","NodeArch":"","NumNodes":0,"Dataplane":"","IPFamily":"","Encapsulation":"","WireguardEnabled":false,"Product":"","CalicoVersion":"","K8SVersion":"","CRIVersion":"","CNIOption":""},"dnsperf":{"LookupTime":{"50":0.00364,"75":0.004745,"90":0.006914,"95":0.008833,"99":0.013641},"ConnectTime":{"50":0.000439,"75":0.000542,"90":0.00088,"95":0.001406,"99":0.003917},"DuplicateSYN":101,"DuplicateSYNACK":0,"FailedCurls":16,"SuccessfulCurls":1326}}`
+	expectedDoc := `{"config":{"TestKind":"dnsperf","Encap":"none","Dataplane":"bpf","NumPolicies":30,"NumServices":20,"NumPods":10,"HostNetwork":false,"TestNamespace":"","Iterations":0,"Duration":0,"DNSPerf":{"NumDomains":0,"Mode":"Inline","RunStress":false,"TestDNSPolicy":false,"NumTargetPods":0,"TargetType":""},"Perf":null,"TTFRConfig":null,"CalicoNodeCPULimit":"40m","LeaveStandingConfig":false},"ClusterDetails":{"Cloud":"","Provisioner":"","NodeType":"","NodeOS":"","NodeKernel":"","NodeArch":"","NumNodes":0,"Dataplane":"","IPFamily":"","Encapsulation":"","WireguardEnabled":false,"Product":"","CalicoVersion":"","K8SVersion":"","CRIVersion":"","CNIOption":""},"dnsperf":{"LookupTime":{"min":0.001,"max":0.013641,"avg":0.004745,"P50":0.00364,"P75":0.004745,"P90":0.006914,"P99":0.013641,"datapoints":17},"ConnectTime":{"min":0.000239,"max":0.003917,"avg":0.000542,"P50":0.000439,"P75":0.000542,"P90":0.00088,"P99":0.003917,"datapoints":17},"DuplicateSYN":101,"DuplicateSYNACK":0,"FailedCurls":16,"SuccessfulCurls":1326}}`
 
 	doc, err := createESDoc(result)
 	require.NoError(t, err)
@@ -77,7 +84,7 @@ func TestCreateESDocBlank(t *testing.T) {
 		DNSPerf: &dnsperf,
 	}
 
-	expectedDoc := `{"config":{"TestKind":"","Encap":"","Dataplane":"","NumPolicies":0,"NumServices":0,"NumPods":0,"HostNetwork":false,"TestNamespace":"","Iterations":0,"Duration":0,"DNSPerf":null,"Perf":null,"TTFRConfig":null,"CalicoNodeCPULimit":"","LeaveStandingConfig":false},"ClusterDetails":{"Cloud":"","Provisioner":"","NodeType":"","NodeOS":"","NodeKernel":"","NodeArch":"","NumNodes":0,"Dataplane":"","IPFamily":"","Encapsulation":"","WireguardEnabled":false,"Product":"","CalicoVersion":"","K8SVersion":"","CRIVersion":"","CNIOption":""},"dnsperf":{"LookupTime":null,"ConnectTime":null,"DuplicateSYN":0,"DuplicateSYNACK":0,"FailedCurls":0,"SuccessfulCurls":0}}`
+	expectedDoc := `{"config":{"TestKind":"","Encap":"","Dataplane":"","NumPolicies":0,"NumServices":0,"NumPods":0,"HostNetwork":false,"TestNamespace":"","Iterations":0,"Duration":0,"DNSPerf":null,"Perf":null,"TTFRConfig":null,"CalicoNodeCPULimit":"","LeaveStandingConfig":false},"ClusterDetails":{"Cloud":"","Provisioner":"","NodeType":"","NodeOS":"","NodeKernel":"","NodeArch":"","NumNodes":0,"Dataplane":"","IPFamily":"","Encapsulation":"","WireguardEnabled":false,"Product":"","CalicoVersion":"","K8SVersion":"","CRIVersion":"","CNIOption":""},"dnsperf":{"LookupTime":{},"ConnectTime":{},"DuplicateSYN":0,"DuplicateSYNACK":0,"FailedCurls":0,"SuccessfulCurls":0}}`
 	doc, err := createESDoc(result)
 	require.NoError(t, err)
 
