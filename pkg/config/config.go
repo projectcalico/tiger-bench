@@ -277,6 +277,16 @@ func defaultAndValidate(cfg *Config) error {
 				}
 			}
 		}
+		if tcfg.TestKind == "dnsperf" {
+			if tcfg.DNSPerf.TestDNSPolicy {
+				if tcfg.DNSPerf.Mode == DNSPerfModeUnset {
+					return fmt.Errorf("Mode must be set for a dnsperf test with TestDNSPolicy enabled")
+				}
+				if tcfg.DNSPerf.NumDomains < 0 {
+					return fmt.Errorf("NumDomains must be non-negative for a dnsperf test with TestDNSPolicy enabled")
+				}
+			}
+		}
 	}
 	return nil
 }
