@@ -311,7 +311,7 @@ func runDNSPerfTest(ctx context.Context, srcPod *corev1.Pod, target string) (Cur
 	result.Target = target
 	result.Success = true
 	cmdfrag := `curl -m 8 -w '{"time_lookup": %{time_namelookup}, "time_connect": %{time_connect}}\n' -s -o /dev/null`
-	cmd := fmt.Sprintf("%s %s", cmdfrag, target)
+	cmd := fmt.Sprintf("%s %s:8080", cmdfrag, target)
 	stdout, _, err := utils.ExecCommandInPod(ctx, srcPod, cmd, 10)
 	if err != nil {
 		log.WithError(err).Error("failed to run curl command")
@@ -509,6 +509,15 @@ func makeDNSPerfPod(nodename string, namespace string, podname string, image str
 			Namespace: namespace,
 		},
 		Spec: corev1.PodSpec{
+			AutomountServiceAccountToken: utils.BoolPtr(false),
+			SecurityContext: &corev1.PodSecurityContext{
+				RunAsNonRoot: utils.BoolPtr(true),
+				RunAsGroup:   utils.Int64Ptr(1000),
+				RunAsUser:    utils.Int64Ptr(1000),
+				SeccompProfile: &corev1.SeccompProfile{
+					Type: corev1.SeccompProfileTypeRuntimeDefault,
+				},
+			},
 			Containers: []corev1.Container{
 				{
 					Name:  "dnsperf",
@@ -517,6 +526,15 @@ func makeDNSPerfPod(nodename string, namespace string, podname string, image str
 						"sh", "-c",
 						"while true; do echo `date`: MARK; sleep 10; done",
 					},
+					SecurityContext: &corev1.SecurityContext{
+						Privileged:               utils.BoolPtr(false),
+						AllowPrivilegeEscalation: utils.BoolPtr(false),
+						ReadOnlyRootFilesystem:   utils.BoolPtr(false),
+						Capabilities: &corev1.Capabilities{
+							Drop: []corev1.Capability{"ALL"},
+						},
+					},
+					ImagePullPolicy: corev1.PullAlways,
 				},
 			},
 			NodeName:      nodename,
@@ -586,11 +604,36 @@ func makeDeployment(namespace string, depname string, replicas int32, hostnetwor
 					},
 				},
 				Spec: corev1.PodSpec{
+					AutomountServiceAccountToken: utils.BoolPtr(false),
+					SecurityContext: &corev1.PodSecurityContext{
+						RunAsNonRoot: utils.BoolPtr(true),
+						RunAsGroup:   utils.Int64Ptr(1000),
+						RunAsUser:    utils.Int64Ptr(1000),
+						SeccompProfile: &corev1.SeccompProfile{
+							Type: corev1.SeccompProfileTypeRuntimeDefault,
+						},
+					},
 					Containers: []corev1.Container{
 						{
 							Name:  depname,
 							Image: image,
 							Args:  args,
+							SecurityContext: &corev1.SecurityContext{
+								Privileged:               utils.BoolPtr(false),
+								AllowPrivilegeEscalation: utils.BoolPtr(false),
+								ReadOnlyRootFilesystem:   utils.BoolPtr(false),
+								Capabilities: &corev1.Capabilities{
+									Drop: []corev1.Capability{"ALL"},
+								},
+							},
+							Ports: []corev1.ContainerPort{
+								{
+									Name:          "http",
+									ContainerPort: 8080,
+									Protocol:      corev1.ProtocolTCP,
+								},
+							},
+							ImagePullPolicy: corev1.PullAlways,
 						},
 					},
 					HostNetwork: hostnetwork,
@@ -622,7 +665,7 @@ func scaleDeploymentLoop(ctx context.Context, clients config.Clients, deployment
 			log.Warning("failed to scale deployment	up")
 		}
 		if ctx.Err() != nil {
-			log.Info("Context expired? Quitting scaleDeploymentLoop")
+			log.Info("Context expired. Quitting scaleDeploymentLoop")
 			return
 		}
 		time.Sleep(sleeptime)

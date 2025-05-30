@@ -497,11 +497,35 @@ func makeDeployment(namespace string, depname string, replicas int32, hostnetwor
 					},
 				},
 				Spec: corev1.PodSpec{
+					AutomountServiceAccountToken: utils.BoolPtr(false),
+					SecurityContext: &corev1.PodSecurityContext{
+						RunAsNonRoot: utils.BoolPtr(true),
+						RunAsGroup:   utils.Int64Ptr(1000),
+						RunAsUser:    utils.Int64Ptr(1000),
+						SeccompProfile: &corev1.SeccompProfile{
+							Type: corev1.SeccompProfileTypeRuntimeDefault,
+						},
+					},
 					Containers: []corev1.Container{
 						{
 							Name:  depname,
 							Image: image,
 							Args:  args,
+							SecurityContext: &corev1.SecurityContext{
+								Privileged:               utils.BoolPtr(false),
+								AllowPrivilegeEscalation: utils.BoolPtr(false),
+								ReadOnlyRootFilesystem:   utils.BoolPtr(false),
+								Capabilities: &corev1.Capabilities{
+									Drop: []corev1.Capability{"ALL"},
+								},
+							},
+							Ports: []corev1.ContainerPort{
+								{
+									Name:          "http",
+									ContainerPort: 8080,
+									Protocol:      corev1.ProtocolTCP,
+								},
+							},
 						},
 					},
 					HostNetwork: hostnetwork,
