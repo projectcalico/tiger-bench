@@ -15,6 +15,6 @@ func TestNFTables(t *testing.T) {
 	_, clients, err := config.New(ctx)
 
 	cmd := `nft flush ruleset`
-	runCommandInNodePods(ctx, clients, cmd)
+	err = runCommandInNodePods(ctx, clients, cmd)
 	require.NoError(t, err)
 }

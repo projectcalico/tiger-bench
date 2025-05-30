@@ -249,7 +249,7 @@ func defaultAndValidate(cfg *Config) error {
 		}
 		if tcfg.TestKind == "dnsperf" {
 			if tcfg.DNSPerf.NumDomains < 0 {
-				return fmt.Errorf("NumDomains must be greater than zero for a dnsperf test")
+				return fmt.Errorf("NumDomains must be non-negative for a dnsperf test")
 			}
 		}
 		if tcfg.TestKind == "thruput-latency" || tcfg.TestKind == "iperf" {

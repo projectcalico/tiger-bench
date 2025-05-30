@@ -547,7 +547,7 @@ func makeDNSPerfPod(nodename string, namespace string, podname string, image str
 						"sh", "-c",
 						"while true; do echo `date`: MARK; sleep 10; done",
 					},
-					ImagePullPolicy: "Always",
+					ImagePullPolicy: corev1.PullAlways,
 				},
 			},
 			NodeName:      nodename,
