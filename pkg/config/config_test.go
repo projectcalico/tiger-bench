@@ -336,7 +336,9 @@ func TestDNSMissingMode(t *testing.T) {
 	fileContent := `
 - testKind: dnsperf
   dnsperf:
+    testDNSPolicy: true
     NumDomains: 4
+    NumTargetPods: 10
 `
 	filePath := "/tmp/test_configs.yaml"
 	err := os.WriteFile(filePath, []byte(fileContent), 0644)
@@ -347,7 +349,7 @@ func TestDNSMissingMode(t *testing.T) {
 	cfg.TestConfigFile = filePath
 	err = loadTestConfigsFromFile(&cfg)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "Mode is required for a dnsperf test")
+	assert.Contains(t, err.Error(), "Mode must be set for a dnsperf test with TestDNSPolicy enabled")
 }
 func TestDNSMissingNumDomains(t *testing.T) {
 	fileContent := `
@@ -364,7 +366,7 @@ func TestDNSMissingNumDomains(t *testing.T) {
 	cfg.TestConfigFile = filePath
 	err = loadTestConfigsFromFile(&cfg)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "non-zero NumDomains is required for a dnsperf test")
+	assert.Contains(t, err.Error(), "Field validation for 'NumTargetPods' failed on the 'gte' tag")
 }
 func TestDNSBasic(t *testing.T) {
 	fileContent := `
@@ -372,6 +374,7 @@ func TestDNSBasic(t *testing.T) {
   dnsperf:
     Mode: Inline
     NumDomains: 10
+    NumTargetPods: 5
 `
 	filePath := "/tmp/test_configs.yaml"
 	err := os.WriteFile(filePath, []byte(fileContent), 0644)
