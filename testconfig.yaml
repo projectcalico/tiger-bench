@@ -36,10 +36,24 @@
     ControlPort: 32000
     TestPort: 32221
 
-- testKind: dnsperf
+- testKind: ttfr
+  numPolicies: 100
+  numServices: 10
+  numPods: 7
+  duration: 60
+  hostNetwork: false
+  iterations: 1
+  leaveStandingConfig: false
   TestNamespace: testns1
+  TTFRConfig:
+    TestPodsPerNode: 53
+    Rate: 2.5
+
+- testKind: dnsperf
+  TestNamespace: dnsperf
   numServices: 10
   iterations: 1
+  leaveStandingConfig: false
   duration: 60
   DNSPerf:
     numDomains: 0
