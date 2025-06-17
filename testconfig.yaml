@@ -8,12 +8,13 @@
   leaveStandingConfig: false
   TestNamespace: testns1
   Perf:
-    direct: false
-    service: false
+    direct: true
+    service: true
     external: true
     ExternalIPOrFQDN: "a769dbaf0a7c14fe98e1d26a18fa5c19-444882487.us-west-2.elb.amazonaws.com"
     # ExternalIPOrFQDN: "34.213.205.24"
     TestPort: 32003
+
 - testKind: thruput-latency
   numPolicies: 5
   numServices: 10
@@ -34,3 +35,15 @@
     # ExternalIPOrFQDN: "test-external-qperf.testns"
     ControlPort: 32000
     TestPort: 32221
+
+- testKind: dnsperf
+  TestNamespace: testns1
+  numServices: 10
+  iterations: 1
+  duration: 60
+  DNSPerf:
+    numDomains: 0
+    RunStress: false
+    TestDNSPolicy: false
+    numTargetPods: 10
+    targetType: service

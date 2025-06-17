@@ -58,9 +58,9 @@ type Config struct {
 	ProxyAddress    string `envconfig:"HTTP_PROXY" default:""`
 	TestConfigFile  string `envconfig:"TESTCONFIGFILE" required:"true"`
 	LogLevel        string `envconfig:"LOG_LEVEL" default:"info"`
-	WebServerImage  string `envconfig:"WEBSERVER_IMAGE" default:"quay.io/tigeradev/tiger-bench-nginx:latest"`
-	PerfImage       string `envconfig:"PERF_IMAGE" default:"quay.io/tigeradev/tiger-bench-perf:latest"`
-	TTFRImage       string `envconfig:"TTFR_IMAGE" default:"quay.io/tigeradev/tiger-bench-ttfr:latest"`
+	WebServerImage  string `envconfig:"WEBSERVER_IMAGE" default:"quay.io/tigeradev/tiger-bench-nginx:v0.4.0"`
+	PerfImage       string `envconfig:"PERF_IMAGE" default:"quay.io/tigeradev/tiger-bench-perf:v0.4.0"`
+	TTFRImage       string `envconfig:"TTFR_IMAGE" default:"quay.io/tigeradev/tiger-bench-ttfr:v0.4.0"`
 	TestConfigs     testConfigs
 }
 
