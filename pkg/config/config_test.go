@@ -139,6 +139,8 @@ func TestDefaults(t *testing.T) {
 	assert.Equal(t, true, cfg.TestConfigs[0].Perf.Service)
 	assert.Equal(t, false, cfg.TestConfigs[0].Perf.External)
 	assert.Equal(t, "testns", cfg.TestConfigs[0].TestNamespace)
+	assert.Equal(t, 32000, cfg.TestConfigs[0].Perf.ControlPort)
+	assert.Equal(t, 32001, cfg.TestConfigs[0].Perf.TestPort)
 }
 
 func TestInvalidTestKind(t *testing.T) {
