@@ -17,7 +17,6 @@ RUN ./cleanup && \
     make
 
 FROM alpine:3.21
-
 RUN apk add --no-cache iperf3 curl tcpdump
 COPY --from=build-env /qperf/src/qperf /usr/bin/qperf
 RUN chmod +x /usr/bin/qperf

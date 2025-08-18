@@ -102,6 +102,7 @@ func DeletePodsWithLabel(ctx context.Context, clients config.Clients, namespace 
 		return err
 	}
 	for _, pod := range podlist.Items {
+		log.Info("Deleting pod: ", pod.Name)
 		err = clients.CtrlClient.Delete(ctx, &pod)
 		if ctrlclient.IgnoreNotFound(err) != nil { // Since we're deleting pods, don't worry if they're already gone
 			log.WithError(err).Errorf("failed to delete pod %v", pod.Name)

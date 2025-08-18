@@ -46,36 +46,17 @@ func enableNftables(ctx context.Context, clients config.Clients) error {
 	if err != nil {
 		return fmt.Errorf("failed to get installation")
 	}
-	if *installation.Spec.CalicoNetwork.LinuxDataplane == operatorv1.LinuxDataplaneNftables {
+
+	err = setKubeProxyMode(childCtx, clients, "nftables")
+	if err != nil {
+		log.WithError(err).Error("failed to set kube-proxy mode to nftables")
+		return err
+	}
+	oldDataplane := installation.Spec.CalicoNetwork.LinuxDataplane
+
+	if *oldDataplane == operatorv1.LinuxDataplaneNftables {
 		log.Info("Nftables already enabled")
 		return nil
-	}
-
-	// Is this cluster nftable ready?
-	kubecm := &corev1.ConfigMap{}
-	err = clients.CtrlClient.Get(childCtx, ctrlclient.ObjectKey{Namespace: "kube-system", Name: "kube-proxy"}, kubecm)
-	log.Debug("ٰVerifing if kube-proxy config is available")
-	if err != nil {
-		return fmt.Errorf("failed to get proxymode")
-	}
-	configStr, ok := kubecm.Data["config.conf"]
-	if !ok {
-		return fmt.Errorf("config.conf not found in kube-proxy configmap")
-	}
-
-	var configMap map[string]interface{}
-	err = yaml.Unmarshal([]byte(configStr), &configMap)
-	if err != nil {
-		return fmt.Errorf("failed to parse YAML: %w", err)
-	}
-
-	mode, ok := configMap["mode"].(string)
-	if !ok {
-		return fmt.Errorf("mode field not found or not a string")
-	}
-	log.Debug("ٰVerifing if kube-proxy is running in nftables mode")
-	if mode != "nftables" {
-		return fmt.Errorf("kube-proxy mode is not nftables (found: %s)", mode)
 	}
 
 	// kubectl patch installation.operator.tigera.io default --type merge -p '{"spec":{"calicoNetwork":{"linuxDataplane":"Nftables"}}}'
@@ -94,9 +75,8 @@ func enableNftables(ctx context.Context, clients config.Clients) error {
 		return fmt.Errorf("failed to patch installation")
 	}
 
-	// Nftables bug ?
+	// This is a workaround for an operator nftables bug: https://github.com/tigera/operator/pull/3926.  Remove this when the bug is fixed.
 	// kubectl patch installation.operator.tigera.io default --type merge -p '{"spec":{"calicoNetwork":{"linuxPolicySetupTimeoutSeconds":null}}}'
-	time.Sleep(1000 * time.Millisecond)
 	patch = []byte(`{"spec":{"calicoNetwork":{"linuxPolicySetupTimeoutSeconds":null}}}`)
 
 	installation = &operatorv1.Installation{}
@@ -126,11 +106,132 @@ func enableNftables(ctx context.Context, clients config.Clients) error {
 		return fmt.Errorf("failed to patch kube-proxy ds")
 	}
 
-	err = waitForTigeraStatus(ctx, clients)
+	err = waitForTigeraStatus(ctx, clients, 900, true)
 	if err != nil {
 		return fmt.Errorf("error waiting for tigera status")
 	}
+
+	// Clear out any residual iptables rules.  This is a workaround, which should not be needed once nftables is GA
+	err = wipeIPTables(ctx, clients)
+	if err != nil {
+		log.WithError(err).Error("failed to wipe iptables")
+	}
+
 	return nil
+}
+
+func setKubeProxyMode(ctx context.Context, clients config.Clients, mode string) error {
+	log.Debug("entering setKubeProxyMode function")
+	kubecm := &corev1.ConfigMap{}
+	err := clients.CtrlClient.Get(ctx, ctrlclient.ObjectKey{Namespace: "kube-system", Name: "kube-proxy"}, kubecm)
+	log.Debug("Verifing if kube-proxy config is available")
+	if err != nil {
+		return fmt.Errorf("failed to get proxymode")
+	}
+	configStr, ok := kubecm.Data["config.conf"]
+	if !ok {
+		return fmt.Errorf("config.conf not found in kube-proxy configmap")
+	}
+
+	var configMap map[string]interface{}
+	err = yaml.Unmarshal([]byte(configStr), &configMap)
+	if err != nil {
+		return fmt.Errorf("failed to parse YAML: %w", err)
+	}
+
+	currentmode, ok := configMap["mode"].(string)
+	if !ok {
+		return fmt.Errorf("mode field not found or not a string")
+	}
+	log.Info("Verifying if kube-proxy is running in desired mode")
+	if currentmode != mode {
+		log.Infof("kube-proxy mode is %s, attempting to update to %s", currentmode, mode)
+		configMap["mode"] = mode
+		configStr, err := yaml.Marshal(configMap)
+		if err != nil {
+			log.Error("failed to marshal YAML")
+			return fmt.Errorf("failed to marshal YAML: %w", err)
+		}
+		kubecm.Data["config.conf"] = string(configStr)
+		log.Info("Patching kube-proxy configmap")
+		err = clients.CtrlClient.Update(ctx, kubecm)
+		if err != nil {
+			log.Error("failed to patch kube-proxy configmap")
+			return fmt.Errorf("failed to patch kube-proxy configmap: %w", err)
+		}
+		log.Info("Patching kube-proxy configmap succeeded")
+		// Restart kube-proxy pods to pick up the new config
+		err = utils.DeletePodsWithLabel(ctx, clients, "kube-system", "k8s-app=kube-proxy")
+		if err != nil {
+			log.Error("failed to delete kube-proxy pods")
+			return fmt.Errorf("failed to restart kube-proxy pods: %w", err)
+		}
+	} else {
+		log.Infof("kube-proxy mode is already %s", currentmode)
+	}
+	return nil
+}
+
+func wipeIPTables(ctx context.Context, clients config.Clients) error {
+	log.Debug("entering wipeIPTables function")
+	// cmd := `iptables-legacy-save | awk '/^[*]/ { print $1 } /^:[A-Z]+ [^-]/ { print $1 " ACCEPT" ; } /COMMIT/ { print $0; }' | iptables-legacy-restore; iptables-save-nft | awk '/^[*]/ { print $1 } /^:[A-Z]+ [^-]/ { print $1 " ACCEPT" ; } /COMMIT/ { print $0; }' | iptables-restore-nft`
+	cmd := `iptables-legacy -F -t raw; iptables-legacy -F -t filter; iptables-legacy -F -t mangle; iptables-legacy -F -t nat; iptables-nft -F -t raw; iptables-nft -F -t filter; iptables-nft -F -t mangle; iptables-nft -F -t nat`
+	err := runCommandInNodePods(ctx, clients, cmd)
+	if err != nil {
+		log.WithError(err).Error("failed to run command ", cmd)
+		return fmt.Errorf("failed to run command %s: %w", cmd, err)
+	}
+	time.Sleep(30 * time.Second)
+	log.Info("Done wiping iptables rules")
+	return nil
+}
+
+func wipeNFTables(ctx context.Context, clients config.Clients) error {
+	log.Debug("entering wipeNFTables function")
+	cmd := `nft flush ruleset`
+	err := runCommandInNodePods(ctx, clients, cmd)
+	if err != nil {
+		log.WithError(err).Error("failed to run command ", cmd)
+		return fmt.Errorf("failed to run command %s: %w", cmd, err)
+	}
+	time.Sleep(30 * time.Second)
+	log.Info("Done wiping nftables rules")
+	return nil
+}
+
+func runCommandInNodePods(ctx context.Context, clients config.Clients, cmd string) error {
+	log.Debug("entering runCommandInNodePods function")
+	pods, err := getCalicoNodePods(ctx, clients)
+	if err != nil {
+		log.WithError(err).Error("failed to get calico-node pods")
+		return err
+	}
+	for _, pod := range pods {
+		log.Info("wiping rules via pod ", pod.Name)
+		var stdout string
+		var stderr string
+		var err error
+
+		stdout, stderr, err = utils.RetryinPod(ctx, clients, &pod, cmd, 10)
+		log.Info("stdout: ", stdout)
+		log.Info("stderr: ", stderr)
+		if err != nil {
+			log.WithError(err).Error("failed to run command ", cmd)
+			return fmt.Errorf("%s", stderr)
+		}
+	}
+	return nil
+}
+
+func getCalicoNodePods(ctx context.Context, clients config.Clients) ([]corev1.Pod, error) {
+	log.Debug("entering getCalicoNodePods function")
+	pods := &corev1.PodList{}
+	err := clients.CtrlClient.List(ctx, pods, ctrlclient.InNamespace("calico-system"), ctrlclient.MatchingLabels{"k8s-app": "calico-node"})
+	if err != nil {
+		log.WithError(err).Error("failed to list calico-node pods")
+		return nil, err
+	}
+	return pods.Items, nil
 }
 
 func enableBPF(ctx context.Context, cfg config.Config, clients config.Clients) error {
@@ -209,7 +310,7 @@ func enableBPF(ctx context.Context, cfg config.Config, clients config.Clients) e
 		log.WithError(err).Error("failed to patch installation")
 		return err
 	}
-	err = waitForTigeraStatus(ctx, clients)
+	err = waitForTigeraStatus(ctx, clients, 600, true)
 	if err != nil {
 		log.WithError(err).Error("error waiting for tigera status")
 		return err
@@ -220,7 +321,7 @@ func enableBPF(ctx context.Context, cfg config.Config, clients config.Clients) e
 func enableIptables(ctx context.Context, clients config.Clients) error {
 	// enable iptables
 	log.Debug("entering enableIptables function")
-	childCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	childCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	installation := &operatorv1.Installation{}
 	log.Debug("Getting installation")
@@ -229,7 +330,15 @@ func enableIptables(ctx context.Context, clients config.Clients) error {
 		log.WithError(err).Error("failed to get installation")
 		return err
 	}
-	if *installation.Spec.CalicoNetwork.LinuxDataplane == operatorv1.LinuxDataplaneIptables {
+
+	err = setKubeProxyMode(childCtx, clients, "iptables")
+	if err != nil {
+		log.WithError(err).Error("failed to set kube-proxy mode to iptables")
+		return err
+	}
+	oldDataplane := installation.Spec.CalicoNetwork.LinuxDataplane
+
+	if *oldDataplane == operatorv1.LinuxDataplaneIptables {
 		log.Info("IPtables already enabled")
 		return nil
 	}
@@ -268,15 +377,23 @@ func enableIptables(ctx context.Context, clients config.Clients) error {
 		return err
 	}
 
-	err = waitForTigeraStatus(ctx, clients)
+	err = waitForTigeraStatus(ctx, clients, 900, true)
 	if err != nil {
 		log.WithError(err).Error("error waiting for tigera status")
 		return err
 	}
+
+	// Clear out any residual nftables rules.  This is a workaround, which should not be needed once nftables is GA
+	err = wipeNFTables(ctx, clients)
+	if err != nil {
+		log.WithError(err).Error("failed to wipe nftables")
+	}
+
 	return nil
 }
 
 func createOrUpdateCM(ctx context.Context, clients config.Clients, host string, port string) error {
+	log.Debug("entering createOrUpdateCM function")
 	// if it doesn't exist already, create configMap with k8s endpoint data in it
 	configMapName := "kubernetes-services-endpoint"
 	namespace := "tigera-operator"
@@ -306,13 +423,22 @@ func createOrUpdateCM(ctx context.Context, clients config.Clients, host string, 
 
 }
 
-func waitForTigeraStatus(ctx context.Context, clients config.Clients) error {
+func waitForTigeraStatus(ctx context.Context, clients config.Clients, timeout int, deleteCalicoNodePods bool) error {
+
+	if deleteCalicoNodePods {
+		// delete all calico-node pods so they all restart in parallel, since this is going to be slow if they update one-by-one
+		err := utils.DeletePodsWithLabel(ctx, clients, "calico-system", "k8s-app=calico-node")
+		if err != nil {
+			log.Warning("failed to delete calico-node pods")
+			// we're not going to return an error here, since the pods will eventually restart, just slower
+		}
+	}
+
 	// wait for tigera status
-	timeout := 600 * time.Second
 	log.Debug("entering waitForTigeraStatus function")
 	apiStatus := &operatorv1.TigeraStatus{}
 	calicoStatus := &operatorv1.TigeraStatus{}
-	childCtx, cancel := context.WithTimeout(ctx, timeout)
+	childCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 	time.Sleep(7 * time.Second) // give the operator time to update the status following whatever might have changed
 
@@ -391,7 +517,7 @@ func updateEncap(ctx context.Context, cfg config.Config, clients config.Clients,
 			return err
 		}
 	}
-	err = waitForTigeraStatus(ctx, clients)
+	err = waitForTigeraStatus(ctx, clients, 600, false)
 	if err != nil {
 		log.WithError(err).Error("error waiting for tigera status")
 		return err
@@ -445,6 +571,7 @@ func patchIPPool(ctx context.Context, clients config.Clients, patch []byte) erro
 }
 
 func makeSvc(namespace string, depname, svcname string) corev1.Service {
+	log.Debug("entering makeSvc function")
 	svcname = utils.SanitizeString(svcname)
 	svc := corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
@@ -471,6 +598,7 @@ func makeSvc(namespace string, depname, svcname string) corev1.Service {
 }
 
 func makeDeployment(namespace string, depname string, replicas int32, hostnetwork bool, image string, args []string) appsv1.Deployment {
+	log.Debug("entering makeDeployment function")
 	depname = utils.SanitizeString(depname)
 	dep := appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
