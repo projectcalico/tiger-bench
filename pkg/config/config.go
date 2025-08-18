@@ -253,7 +253,7 @@ func defaultAndValidate(cfg *Config) error {
 		}
 		if tcfg.TestKind == "thruput-latency" || tcfg.TestKind == "iperf" {
 			if tcfg.Perf == nil {
-				tcfg.Perf = &PerfConfig{true, true, false, 32000, 0, ""} // Default so that old configs don't break
+				tcfg.Perf = &PerfConfig{true, true, false, 32000, 32001, ""} // Default so that old configs don't break
 				continue
 			}
 			if tcfg.Perf.External {
