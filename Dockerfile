@@ -22,15 +22,17 @@ RUN mkdir /results
 FROM alpine:3.21
 ARG AWS_IAM_AUTHENTICATOR_URL=https://github.com/kubernetes-sigs/aws-iam-authenticator/releases/download/v0.6.30/aws-iam-authenticator_0.6.30_linux_amd64
 
-ADD ${AWS_IAM_AUTHENTICATOR_URL} /usr/local/bin/aws-iam-authenticator
-RUN apk add --update ca-certificates gettext && \
-    chmod +x /usr/local/bin/aws-iam-authenticator
-RUN apk add --no-cache aws-cli
-
-RUN apk add --no-cache iperf3 curl
+RUN apk add --update ca-certificates gettext
+RUN apk add --no-cache aws-cli iperf3 curl
 RUN apk add --no-cache --repository http://dl-3.alpinelinux.org/alpine/edge/testing/ qperf
 COPY --from=builder /results /results
 COPY --from=builder /benchmark/benchmark /benchmark
+
+RUN curl -L --retry 5 --retry-delay 10 \
+  ${AWS_IAM_AUTHENTICATOR_URL} \
+  -o /usr/local/bin/aws-iam-authenticator && \
+  chmod +x /usr/local/bin/aws-iam-authenticator
+
 ENV KUBECONFIG="/kubeconfig"
 ENV TESTCONFIGFILE="/testconfig.yaml"
 CMD ["/benchmark"]
