@@ -1,0 +1,248 @@
+[
+  {
+    "config": {
+      "TestKind": "thruput-latency",
+      "Encap": "",
+      "Dataplane": "",
+      "NumPolicies": 5,
+      "NumServices": 10,
+      "NumPods": 7,
+      "HostNetwork": false,
+      "TestNamespace": "testns",
+      "Iterations": 1,
+      "Duration": 10,
+      "DNSPerf": null,
+      "Perf": {
+        "Direct": true,
+        "Service": true,
+        "External": false,
+        "ControlPort": 32000,
+        "TestPort": 32001,
+        "ExternalIPOrFQDN": ""
+      },
+      "TTFRConfig": null,
+      "CalicoNodeCPULimit": "",
+      "LeaveStandingConfig": true
+    },
+    "ClusterDetails": {
+      "Cloud": "unknown",
+      "Provisioner": "kubeadm",
+      "NodeType": "linux",
+      "NodeOS": "Debian GNU/Linux 12 (bookworm)",
+      "NodeKernel": "6.8.0-71-generic",
+      "NodeArch": "amd64",
+      "NumNodes": 2,
+      "Dataplane": "iptables",
+      "IPFamily": "ipv4",
+      "Encapsulation": "VXLANCrossSubnet",
+      "WireguardEnabled": false,
+      "Product": "calico",
+      "CalicoVersion": "v3.30.2",
+      "K8SVersion": "v1.32.0",
+      "CRIVersion": "containerd://1.7.24",
+      "CNIOption": "Calico"
+    },
+    "thruput-latency": {
+      "Latency": {
+        "pod-pod": {
+          "min": 15.8,
+          "max": 15.8,
+          "avg": 15.8,
+          "P50": 15.8,
+          "P75": 15.8,
+          "P90": 15.8,
+          "P99": 15.8,
+          "unit": "us",
+          "datapoints": 1
+        },
+        "pod-svc-pod": {
+          "min": 16.5,
+          "max": 16.5,
+          "avg": 16.5,
+          "P50": 16.5,
+          "P75": 16.5,
+          "P90": 16.5,
+          "P99": 16.5,
+          "unit": "us",
+          "datapoints": 1
+        },
+        "ext-svc-pod": {}
+      },
+      "Throughput": {
+        "pod-pod": {
+          "min": 21600,
+          "max": 21600,
+          "avg": 21600,
+          "P50": 21600,
+          "P75": 21600,
+          "P90": 21600,
+          "P99": 21600,
+          "unit": "Mb/sec",
+          "datapoints": 1
+        },
+        "pod-svc-pod": {
+          "min": 20200,
+          "max": 20200,
+          "avg": 20200,
+          "P50": 20200,
+          "P75": 20200,
+          "P90": 20200,
+          "P99": 20200,
+          "unit": "Mb/sec",
+          "datapoints": 1
+        },
+        "ext-svc-pod": {}
+      }
+    }
+  },
+  {
+    "config": {
+      "TestKind": "iperf",
+      "Encap": "",
+      "Dataplane": "",
+      "NumPolicies": 6,
+      "NumServices": 11,
+      "NumPods": 6,
+      "HostNetwork": false,
+      "TestNamespace": "testns",
+      "Iterations": 1,
+      "Duration": 10,
+      "DNSPerf": null,
+      "Perf": {
+        "Direct": true,
+        "Service": true,
+        "External": false,
+        "ControlPort": 32000,
+        "TestPort": 32001,
+        "ExternalIPOrFQDN": ""
+      },
+      "TTFRConfig": null,
+      "CalicoNodeCPULimit": "",
+      "LeaveStandingConfig": true
+    },
+    "ClusterDetails": {
+      "Cloud": "unknown",
+      "Provisioner": "kubeadm",
+      "NodeType": "linux",
+      "NodeOS": "Debian GNU/Linux 12 (bookworm)",
+      "NodeKernel": "6.8.0-71-generic",
+      "NodeArch": "amd64",
+      "NumNodes": 2,
+      "Dataplane": "iptables",
+      "IPFamily": "ipv4",
+      "Encapsulation": "VXLANCrossSubnet",
+      "WireguardEnabled": false,
+      "Product": "calico",
+      "CalicoVersion": "v3.30.2",
+      "K8SVersion": "v1.32.0",
+      "CRIVersion": "containerd://1.7.24",
+      "CNIOption": "Calico"
+    },
+    "iperf": {
+      "Retries": {
+        "pod-pod": {
+          "min": 56242,
+          "max": 56242,
+          "avg": 56242,
+          "P50": 56242,
+          "P75": 56242,
+          "P90": 56242,
+          "P99": 56242,
+          "unit": "none",
+          "datapoints": 1
+        },
+        "pod-svc-pod": {
+          "min": 59817,
+          "max": 59817,
+          "avg": 59817,
+          "P50": 59817,
+          "P75": 59817,
+          "P90": 59817,
+          "P99": 59817,
+          "unit": "none",
+          "datapoints": 1
+        },
+        "ext-svc-pod": {}
+      },
+      "Throughput": {
+        "pod-pod": {
+          "min": 91701.305416915,
+          "max": 91701.305416915,
+          "avg": 91701.305416915,
+          "P50": 91701.305416915,
+          "P75": 91701.305416915,
+          "P90": 91701.305416915,
+          "P99": 91701.305416915,
+          "datapoints": 1
+        },
+        "pod-svc-pod": {
+          "min": 89655.18182698895,
+          "max": 89655.18182698895,
+          "avg": 89655.18182698895,
+          "P50": 89655.18182698895,
+          "P75": 89655.18182698895,
+          "P90": 89655.18182698895,
+          "P99": 89655.18182698895,
+          "unit": "Mb/sec",
+          "datapoints": 1
+        },
+        "ext-svc-pod": {}
+      }
+    }
+  },
+  {
+    "config": {
+      "TestKind": "ttfr",
+      "Encap": "",
+      "Dataplane": "",
+      "NumPolicies": 7,
+      "NumServices": 12,
+      "NumPods": 8,
+      "HostNetwork": false,
+      "TestNamespace": "testns",
+      "Iterations": 1,
+      "Duration": 60,
+      "DNSPerf": null,
+      "Perf": null,
+      "TTFRConfig": {
+        "TestPodsPerNode": 53,
+        "Rate": 2.5
+      },
+      "CalicoNodeCPULimit": "",
+      "LeaveStandingConfig": false
+    },
+    "ClusterDetails": {
+      "Cloud": "unknown",
+      "Provisioner": "kubeadm",
+      "NodeType": "linux",
+      "NodeOS": "Debian GNU/Linux 12 (bookworm)",
+      "NodeKernel": "6.8.0-71-generic",
+      "NodeArch": "amd64",
+      "NumNodes": 2,
+      "Dataplane": "iptables",
+      "IPFamily": "ipv4",
+      "Encapsulation": "VXLANCrossSubnet",
+      "WireguardEnabled": false,
+      "Product": "calico",
+      "CalicoVersion": "v3.30.2",
+      "K8SVersion": "v1.32.0",
+      "CRIVersion": "containerd://1.7.24",
+      "CNIOption": "Calico"
+    },
+    "ttfr": [
+      {
+        "ttfrSummary": {
+          "min": 0.00059141,
+          "max": 0.002781802,
+          "avg": 0.0007567828466666665,
+          "P50": 0.000716177,
+          "P75": 0.000787486,
+          "P90": 0.000911463,
+          "P99": 0.001219205,
+          "unit": "seconds",
+          "datapoints": 150
+        }
+      }
+    ]
+  }
+]

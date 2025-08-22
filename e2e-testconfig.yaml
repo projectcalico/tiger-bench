@@ -1,0 +1,28 @@
+- testKind: thruput-latency
+  numPolicies: 5
+  numServices: 10
+  numPods: 7
+  duration: 10
+  hostNetwork: false
+  iterations: 1
+  LeaveStandingConfig: true
+
+- testKind: iperf
+  numPolicies: 6
+  numServices: 11
+  numPods: 6
+  duration: 10
+  hostNetwork: false
+  iterations: 1
+  LeaveStandingConfig: true
+
+- testKind: ttfr
+  numPolicies: 7
+  numServices: 12
+  numPods: 8
+  duration: 60
+  hostNetwork: false
+  iterations: 1
+  TTFRConfig:
+    TestPodsPerNode: 53
+    Rate: 2.5
