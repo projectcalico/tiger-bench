@@ -1,0 +1,7 @@
+- testKind: thruput-latency
+  numPolicies: 5
+  numServices: 10
+  numPods: 7
+  duration: 10
+  hostNetwork: false
+  iterations: 1
