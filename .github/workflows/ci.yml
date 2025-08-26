@@ -1,10 +1,13 @@
 name: ci
+#  This file requires QUAY_USERNAME, REGISTRY, ORGANISATION variables and a QUAY_TOKEN secret
 
 on:
   push:
 
 env:
   GO_VERSION: 1.24.3
+  REGISTRY: quay.io
+  ORGANISATION: tigeradev
 
 jobs:
   test:
@@ -35,23 +38,23 @@ jobs:
       matrix:
         include:
           - dockerfile: ./images/perf/Dockerfile
-            image: quay.io/tigeradev/tiger-bench-perf
+            image: ${{ vars.REGISTRY }}/${{ vars.ORGANISATION }}/tiger-bench-perf
           - dockerfile: ./images/nginx/Dockerfile
-            image: quay.io/tigeradev/tiger-bench-nginx
+            image: ${{ vars.REGISTRY }}/${{ vars.ORGANISATION }}/tiger-bench-nginx
           - dockerfile: ./images/ttfr/Dockerfile
-            image: quay.io/tigeradev/tiger-bench-ttfr
+            image: ${{ vars.REGISTRY }}/${{ vars.ORGANISATION }}/tiger-bench-ttfr
           - dockerfile: ./Dockerfile
-            image: quay.io/tigeradev/tiger-bench
+            image: ${{ vars.REGISTRY }}/${{ vars.ORGANISATION }}/tiger-bench
     permissions:
       contents: read
       packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Login to quay.io
+      - name: Login to Docker registry
         uses: docker/login-action@v3
         with:
-          registry: quay.io
+          registry: ${{ vars.REGISTRY }}
           username: ${{ vars.QUAY_USERNAME }}
           password: ${{ secrets.QUAY_TOKEN }}
       - name: Extract metadata (tags, labels) for Docker
