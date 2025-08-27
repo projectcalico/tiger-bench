@@ -15,9 +15,9 @@ ORGANISATION="${ORGANISATION:-tigeradev}"
 kind create cluster --kubeconfig "$KUBECONFIG_PATH" --config kind-config.yaml || true
 
 # Install Calico
-kubectl --kubeconfig "$KUBECONFIG_PATH" create -f https://raw.githubusercontent.com/projectcalico/calico/$CALICO_VERSION/manifests/operator-crds.yaml || true
-kubectl --kubeconfig "$KUBECONFIG_PATH" create -f https://raw.githubusercontent.com/projectcalico/calico/$CALICO_VERSION/manifests/tigera-operator.yaml || true
-kubectl --kubeconfig "$KUBECONFIG_PATH" create -f https://raw.githubusercontent.com/projectcalico/calico/$CALICO_VERSION/manifests/custom-resources.yaml || true
+curl --retry 10 --retry-all-errors -sSL https://raw.githubusercontent.com/projectcalico/calico/$CALICO_VERSION/manifests/operator-crds.yaml    | kubectl --kubeconfig "$KUBECONFIG_PATH" apply --server-side --force-conflicts -f -
+curl --retry 10 --retry-all-errors -sSL https://raw.githubusercontent.com/projectcalico/calico/$CALICO_VERSION/manifests/tigera-operator.yaml  | kubectl --kubeconfig "$KUBECONFIG_PATH" apply --server-side --force-conflicts -f -
+curl --retry 10 --retry-all-errors -sSL https://raw.githubusercontent.com/projectcalico/calico/$CALICO_VERSION/manifests/custom-resources.yaml | kubectl --kubeconfig "$KUBECONFIG_PATH" apply --server-side --force-conflicts -f -
 
 # Load test images into KinD nodes
 for img in tiger-bench-perf tiger-bench-nginx tiger-bench-ttfr; do
@@ -47,9 +47,4 @@ docker run --rm --net=host \
   "$REGISTRY/$ORGANISATION/$TOOL_IMAGE"
 
 # Validate the results file
-# create a virtual environment
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-# Run tests
-python3 -m unittest test_validate_results.py
+go run validate_results.go
