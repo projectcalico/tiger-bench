@@ -19,6 +19,8 @@ class TestResultsJson(unittest.TestCase):
             self.test_config = None
 
     def test_results_count(self):
+        if self.test_config is None:
+            self.fail("e2e-testconfig.yaml not found")
         num_tests = len(self.test_config)
         self.assertEqual(
             len(self.results), num_tests, f"results.json should contain {num_tests} test results"

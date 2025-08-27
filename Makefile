@@ -38,8 +38,7 @@ test-nginx:
 test-ttfr:
 	cd images/ttfr && go test -v ./pingo_test.go
 
-clean:
-	clean-perf clean-nginx clean-ttfr clean-tool clean-e2e
+clean: clean-perf clean-nginx clean-ttfr clean-tool clean-e2e
 
 clean-perf:
 	docker rmi $(REGISTRY)/$(ORGANISATION)/tiger-bench-perf || true
