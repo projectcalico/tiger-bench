@@ -124,6 +124,7 @@ type TestConfig struct {
 	Encap               Encap     `validate:"omitempty,oneof=none vxlan ipip"`
 	Dataplane           DataPlane `validate:"omitempty,oneof=iptables bpf nftables"`
 	NumPolicies         int       `validate:"gte=0"`
+	NumIdlePolicies     int       `default:"0" validate:"gte=0"`
 	NumServices         int       `validate:"gte=0"`
 	NumPods             int       `validate:"gte=0"`
 	HostNetwork         bool
