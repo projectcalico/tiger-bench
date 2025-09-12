@@ -85,6 +85,7 @@ A list of test run definitions are provided as [`testconfig.yaml`](testconfig.ya
 ```
 - testKind: thruput-latency
   numPolicies: 5
+  numIdlePolicies: 3
   numServices: 10
   numPods: 7
   duration: 5
@@ -100,6 +101,7 @@ A list of test run definitions are provided as [`testconfig.yaml`](testconfig.ya
     ExternalIPOrFQDN: "a6c519e4e9d5a46d795e0d41bf82e93f-1429478103.us-west-2.elb.amazonaws.com"
 - testKind: thruput-latency
   numPolicies: 20
+  numIdlePolicies: 3
   numServices: 3
   numPods: 9
   duration: 4
@@ -126,7 +128,7 @@ There are 2 tests requested in this example config.
 
 `testKind` is required - at present you can only ask for `"thruput-latency"` or `ttfr`
 
-`numPolicies`, `numServices`, `numPods` specify the standing config desired for this test. Standing config exists simply to "load" the cluster up with config, they do not take any active part in the tests themselves. The number that you can create is limited by your cluster - you cannot create more standing pods than will fit on your cluster!
+`numPolicies`, `numIdlePolicies`, `numServices`, `numPods` specify the standing config desired for this test. Standing config exists simply to "load" the cluster up with config.  The number that you can create is limited by your cluster - e.g. you cannot create more standing pods than will fit on your cluster!  `numPolicies` creates policies that apply to the test pods. `numIdlePolicies` creates policies that will NOT apply to the test pods.
 
 `leaveStandingConfig` tells the tool whether it should leave or clean up the standing resources it created for this test. It is sometimes useful to leave standing config up between tests, especially if it takes a long time to set up.
 
@@ -223,6 +225,7 @@ An example result from a "thruput-latency" test might look like:
       "Encap": "",
       "Dataplane": "",
       "NumPolicies": 5,
+      "NumIdlePolicies": 3,
       "NumServices": 10,
       "NumPods": 7,
       "HostNetwork": false,
@@ -367,6 +370,7 @@ An example result from a "ttfr" test might look like:
       "Encap": "",
       "Dataplane": "",
       "NumPolicies": 100,
+      "NumIdlePolicies": 3,
       "NumServices": 10,
       "NumPods": 7,
       "HostNetwork": false,

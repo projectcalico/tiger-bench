@@ -423,6 +423,10 @@ func SetupStandingConfig(ctx context.Context, clients config.Clients, testConfig
 	if err != nil {
 		return err
 	}
+	err = policy.DeployIdlePolicies(ctx, clients, testConfig.NumIdlePolicies, namespace)
+	if err != nil {
+		return err
+	}
 	// Deploy pods
 	deployment := makeDeployment(namespace, "standing-deployment", int32(testConfig.NumPods), false, webServerImage, []string{})
 	deployment, err = utils.GetOrCreateDeployment(ctx, clients, deployment)
