@@ -78,6 +78,7 @@ type TestKind string
 
 // TestKind possible values.
 const (
+	TestKindNone    TestKind = "none"
 	TestKindDNSPerf TestKind = "dnsperf"
 	TestKindIperf   TestKind = "iperf"
 	TestKindQperf   TestKind = "thruput-latency"
@@ -120,7 +121,7 @@ const (
 
 // TestConfig represents a test to run on a cluster, and the configuration for the test.
 type TestConfig struct {
-	TestKind            TestKind  `validate:"required,oneof=dnsperf iperf thruput-latency ttfr"`
+	TestKind            TestKind  `validate:"required,oneof=none dnsperf iperf thruput-latency ttfr"`
 	Encap               Encap     `validate:"omitempty,oneof=none vxlan ipip"`
 	Dataplane           DataPlane `validate:"omitempty,oneof=iptables bpf nftables"`
 	NumPolicies         int       `validate:"gte=0"`
