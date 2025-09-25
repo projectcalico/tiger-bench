@@ -51,11 +51,7 @@ func DeployPolicies(ctx context.Context, clients config.Clients, numPolicies int
 	}
 	if numPolicies > currentNumPolicies {
 		// If we do not have enough policies, create them
-		podSelector := metav1.LabelSelector{
-			MatchExpressions: []metav1.LabelSelectorRequirement{
-				{Key: "app", Operator: metav1.LabelSelectorOpExists},
-			},
-		}
+		podSelector := metav1.LabelSelector{}
 
 		return BulkCreatePolicies(ctx, clients, namespace, "policy", podSelector, nil, currentNumPolicies, numPolicies)
 
@@ -131,12 +127,22 @@ func BulkCreatePolicies(ctx context.Context, clients config.Clients, namespace s
 				},
 			}
 		}
+		podMatch := podSelector.MatchExpressions
+		selector := podSelector
+		if podMatch == nil {
+			selector = metav1.LabelSelector{
+				MatchExpressions: []metav1.LabelSelectorRequirement{
+					{Key: fmt.Sprintf("policy-%d", v), Operator: metav1.LabelSelectorOpExists},
+					{Key: fmt.Sprintf("blah-%d", v), Operator: metav1.LabelSelectorOpDoesNotExist},
+				},
+			}
+		}
 		sem <- struct{}{}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			errors[i] = createPolicy(ctx, clients, name, namespace, podSelector, peers, []int{80})
+			errors[i] = createPolicy(ctx, clients, name, namespace, selector, peers, []int{80})
 		}()
 	}
 	wg.Wait()
