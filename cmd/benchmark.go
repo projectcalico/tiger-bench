@@ -83,6 +83,8 @@ func main() {
 		thisResult := results.Result{}
 		thisResult.Config = *testConfig
 		switch testConfig.TestKind {
+		case config.TestKindNone:
+			// No test to run
 		case config.TestKindIperf:
 			var iperfResults []*iperf.Results
 			err = policy.CreateTestPolicy(ctx, clients, testPolicyName, testConfig.TestNamespace, []int{testConfig.Perf.TestPort})
