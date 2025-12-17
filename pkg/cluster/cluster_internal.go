@@ -597,9 +597,19 @@ func makeSvc(namespace string, depname, svcname string) corev1.Service {
 	return svc
 }
 
-func makeDeployment(namespace string, depname string, replicas int32, hostnetwork bool, image string) appsv1.Deployment {
+
+func makeDeployment(namespace string, depname string, replicas int32, hostnetwork bool, image string, labels []string) appsv1.Deployment {
 	log.Debug("entering makeDeployment function")
 	depname = utils.SanitizeString(depname)
+
+	lbls := map[string]string{
+		"app": "standing",
+		"dep": depname,
+	}
+	for _, label := range labels {
+		lbls[label] = "true"
+	}
+
 	dep := appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Labels: map[string]string{
@@ -619,10 +629,7 @@ func makeDeployment(namespace string, depname string, replicas int32, hostnetwor
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"app": "standing",
-						"dep": depname,
-					},
+					Labels: lbls,
 				},
 				Spec: corev1.PodSpec{
 					AutomountServiceAccountToken: utils.BoolPtr(false),
