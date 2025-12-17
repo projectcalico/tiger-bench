@@ -597,7 +597,7 @@ func makeSvc(namespace string, depname, svcname string) corev1.Service {
 	return svc
 }
 
-func makeDeployment(namespace string, depname string, replicas int32, hostnetwork bool, image string, args []string) appsv1.Deployment {
+func makeDeployment(namespace string, depname string, replicas int32, hostnetwork bool, image string) appsv1.Deployment {
 	log.Debug("entering makeDeployment function")
 	depname = utils.SanitizeString(depname)
 	dep := appsv1.Deployment{
@@ -638,7 +638,6 @@ func makeDeployment(namespace string, depname string, replicas int32, hostnetwor
 						{
 							Name:  depname,
 							Image: image,
-							Args:  args,
 							SecurityContext: &corev1.SecurityContext{
 								Privileged:               utils.BoolPtr(false),
 								AllowPrivilegeEscalation: utils.BoolPtr(false),

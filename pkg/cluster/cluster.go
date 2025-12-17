@@ -428,7 +428,7 @@ func SetupStandingConfig(ctx context.Context, clients config.Clients, testConfig
 		return err
 	}
 	// Deploy pods
-	deployment := makeDeployment(namespace, "standing-deployment", int32(testConfig.NumPods), false, webServerImage, []string{})
+	deployment := makeDeployment(namespace, "standing-deployment", int32(testConfig.NumPods), false, webServerImage)
 	deployment, err = utils.GetOrCreateDeployment(ctx, clients, deployment)
 	if err != nil {
 		return err
@@ -447,7 +447,7 @@ func SetupStandingConfig(ctx context.Context, clients config.Clients, testConfig
 
 	// Deploy services
 	// start by making a 10-pod deployment to back the services
-	deployment = makeDeployment(namespace, "standing-svc", 10, false, webServerImage, []string{})
+	deployment = makeDeployment(namespace, "standing-svc", 10, false, webServerImage)
 	deployment, err = utils.GetOrCreateDeployment(ctx, clients, deployment)
 	if err != nil {
 		log.WithError(err).Error("error creating deployment standing-svc")

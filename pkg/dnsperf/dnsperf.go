@@ -342,7 +342,7 @@ func runDNSPerfTest(ctx context.Context, srcPod *corev1.Pod, target string) (Cur
 	cmd := fmt.Sprintf("%s %s:8080", cmdfrag, target)
 	stdout, _, err := utils.ExecCommandInPod(ctx, srcPod, cmd, 10)
 	if err != nil {
-		if ctx.Err() == nil {  // Only log error if context is still valid
+		if ctx.Err() == nil { // Only log error if context is still valid
 			log.WithError(err).Error("failed to run curl command")
 		}
 		result.Success = false
@@ -550,10 +550,10 @@ func makeDNSPerfPod(nodename string, namespace string, podname string, image str
 			},
 			Containers: []corev1.Container{
 				{
-					Name:  "dnsperf",
-					Image: image,
+					Name:    "dnsperf",
+					Image:   image,
+					Command: []string{"/bin/sh", "-c"},
 					Args: []string{
-						"sh", "-c",
 						"while true; do echo `date`: MARK; sleep 10; done",
 					},
 					SecurityContext: &corev1.SecurityContext{
