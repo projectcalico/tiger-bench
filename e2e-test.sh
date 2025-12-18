@@ -10,11 +10,13 @@ TEST_YAML="${TEST_YAML:-e2e-testconfig.yaml}"
 CALICO_VERSION="${CALICO_VERSION:-v3.30.2}"
 REGISTRY="${REGISTRY:-quay.io}"
 ORGANISATION="${ORGANISATION:-tigeradev}"
-# Default image names (Makefile will pass explicit image names).
-TOOL_IMAGE="${TOOL_IMAGE:-$REGISTRY/$ORGANISATION/tiger-bench}"
-PERF_IMAGE="${PERF_IMAGE:-$REGISTRY/$ORGANISATION/tiger-bench-perf}"
-WEBSERVER_IMAGE="${WEBSERVER_IMAGE:-$REGISTRY/$ORGANISATION/tiger-bench-nginx}"
-TTFR_IMAGE="${TTFR_IMAGE:-$REGISTRY/$ORGANISATION/tiger-bench-ttfr}"
+# VERSION can be set by the Makefile; default to v0.5.0 for local runs.
+VERSION="${VERSION:-v0.5.0}"
+# Default image names (Makefile will pass explicit image names including tags).
+TOOL_IMAGE="${TOOL_IMAGE:-$REGISTRY/$ORGANISATION/tiger-bench:${VERSION}}"
+PERF_IMAGE="${PERF_IMAGE:-$REGISTRY/$ORGANISATION/tiger-bench-perf:${VERSION}}"
+WEBSERVER_IMAGE="${WEBSERVER_IMAGE:-$REGISTRY/$ORGANISATION/tiger-bench-nginx:${VERSION}}"
+TTFR_IMAGE="${TTFR_IMAGE:-$REGISTRY/$ORGANISATION/tiger-bench-ttfr:${VERSION}}"
 
 kind create cluster --kubeconfig "$KUBECONFIG_PATH" --config kind-config.yaml || true
 
@@ -32,7 +34,7 @@ for img in "${images[@]}"; do
     kind load docker-image "$img" --name "$KIND_CLUSTER_NAME"
   else
     echo "Required image not found locally: $img"
-    echo "Build the images via 'make build' or pass the correct image variables to the Makefile."
+    echo "Build the images via 'make build' or set the image variables when running this script."
     exit 1
   fi
 done
@@ -59,7 +61,7 @@ fi
 docker run --rm --net=host \
   -v "${PWD}":/results \
   -v "$KUBECONFIG_PATH:/kubeconfig:ro" \
-  -v "$(pwd)/$TEST_YAML:/testconfig.yaml:ro" \
+  -v "${PWD}/$TEST_YAML:/testconfig.yaml:ro" \
   -e WEBSERVER_IMAGE="$WEBSERVER_IMAGE" \
   -e PERF_IMAGE="$PERF_IMAGE" \
   -e TTFR_IMAGE="$TTFR_IMAGE" \
