@@ -352,7 +352,7 @@ func makePod(nodename string, namespace string, podname string, hostnetwork bool
 							Drop: []corev1.Capability{"ALL"},
 						},
 					},
-					ImagePullPolicy: corev1.PullAlways,
+					ImagePullPolicy: corev1.PullIfNotPresent,
 					Ports: []corev1.ContainerPort{
 						{
 							Name:          "test-port",
