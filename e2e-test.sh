@@ -7,7 +7,7 @@ set -euox pipefail
 KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-tb-e2e}"
 KUBECONFIG_PATH="${KUBECONFIG_PATH:-$(pwd)/kubeconfig}"
 TEST_YAML="${TEST_YAML:-e2e-testconfig.yaml}"
-TOOL_IMAGE="${TOOL_IMAGE:-tiger-bench:latest}"
+TOOL_IMAGE="${TOOL_IMAGE:-tiger-bench:v0.5.0}"
 CALICO_VERSION="${CALICO_VERSION:-v3.30.2}"
 REGISTRY="${REGISTRY:-quay.io}"
 ORGANISATION="${ORGANISATION:-tigeradev}"
@@ -21,8 +21,8 @@ curl --retry 10 --retry-all-errors -sSL https://raw.githubusercontent.com/projec
 
 # Load test images into KinD nodes
 for img in tiger-bench-perf tiger-bench-nginx tiger-bench-ttfr; do
-  docker image inspect "$REGISTRY/$ORGANISATION/$img:latest" >/dev/null 2>&1 || { echo "Image $img not found"; exit 1; }
-  kind load docker-image "$REGISTRY/$ORGANISATION/$img:latest" --name "$KIND_CLUSTER_NAME"
+  docker image inspect "$REGISTRY/$ORGANISATION/$img:v0.5.0" >/dev/null 2>&1 || { echo "Image $img not found"; exit 1; }
+  kind load docker-image "$REGISTRY/$ORGANISATION/$img:v0.5.0" --name "$KIND_CLUSTER_NAME"
 done
 
 # Wait for nodes to be ready
@@ -41,9 +41,9 @@ docker run --rm --net=host \
   -v "${PWD}":/results \
   -v "$KUBECONFIG_PATH:/kubeconfig:ro" \
   -v "$(pwd)/$TEST_YAML:/testconfig.yaml:ro" \
-  -e WEBSERVER_IMAGE="$REGISTRY/$ORGANISATION/tiger-bench-nginx:latest" \
-  -e PERF_IMAGE="$REGISTRY/$ORGANISATION/tiger-bench-perf:latest" \
-  -e TTFR_IMAGE="$REGISTRY/$ORGANISATION/tiger-bench-ttfr:latest" \
+  -e WEBSERVER_IMAGE="$REGISTRY/$ORGANISATION/tiger-bench-nginx:v0.5.0" \
+  -e PERF_IMAGE="$REGISTRY/$ORGANISATION/tiger-bench-perf:v0.5.0" \
+  -e TTFR_IMAGE="$REGISTRY/$ORGANISATION/tiger-bench-ttfr:v0.5.0" \
   "$REGISTRY/$ORGANISATION/$TOOL_IMAGE"
 
 # Validate the results file
