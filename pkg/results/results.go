@@ -30,8 +30,8 @@ type Result struct {
 	ClusterDetails cluster.Details   `json:"ClusterDetails"`
 	// CalicoNodeCPU    stats.MinMaxAvg      `json:"CalicoNodeCPU,omitempty"`
 	// CalicoNodeMemory stats.MinMaxAvg      `json:"CalicoNodeMemory,omitempty"`
-	TTFR    []*ttfr.ResultSummary  `json:"ttfr,omitempty"`
-	IPerf   *iperf.ResultSummary `json:"iperf,omitempty"`
-	QPerf   *qperf.ResultSummary `json:"thruput-latency,omitempty"`
-	DNSPerf *dnsperf.Results     `json:"dnsperf,omitempty"`
+	TTFR    []*ttfr.ResultSummary `json:"ttfr,omitempty"`
+	IPerf   *iperf.ResultSummary  `json:"iperf,omitempty"`
+	QPerf   *qperf.ResultSummary  `json:"thruput-latency,omitempty"`
+	DNSPerf *dnsperf.Results      `json:"dnsperf,omitempty"`
 }
