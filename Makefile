@@ -57,5 +57,12 @@ clean-e2e:
 	@rm -f kubeconfig
 
 e2e-test: build clean-e2e
-	KIND_CLUSTER_NAME=$(E2E_CLUSTER_NAME) REGISTRY=$(REGISTRY) ORGANISATION=$(ORGANISATION) bash ./e2e-test.sh
+	KIND_CLUSTER_NAME=$(E2E_CLUSTER_NAME) \
+	REGISTRY=$(REGISTRY) \
+	ORGANISATION=$(ORGANISATION) \
+	PERF_IMAGE=$(REGISTRY)/$(ORGANISATION)/tiger-bench-perf \
+	WEBSERVER_IMAGE=$(REGISTRY)/$(ORGANISATION)/tiger-bench-nginx \
+	TTFR_IMAGE=$(REGISTRY)/$(ORGANISATION)/tiger-bench-ttfr \
+	TOOL_IMAGE=$(REGISTRY)/$(ORGANISATION)/tiger-bench \
+	bash ./e2e-test.sh
 	$(MAKE) clean-e2e
