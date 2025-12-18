@@ -338,11 +338,10 @@ func makePod(nodename string, namespace string, podname string, hostnetwork bool
 			},
 			Containers: []corev1.Container{
 				{
-					Name:  "iperf",
-					Image: image,
+					Name:    "iperf",
+					Image:   image,
+					Command: []string{"/bin/sh", "-c"},
 					Args: []string{
-						"/bin/sh",
-						"-c",
 						command,
 					},
 					SecurityContext: &corev1.SecurityContext{
