@@ -336,6 +336,7 @@ func makePod(nodename string, namespace string, podname string, hostnetwork bool
 					Type: corev1.SeccompProfileTypeRuntimeDefault,
 				},
 			},
+			EnableServiceLinks: utils.BoolPtr(false),
 			Containers: []corev1.Container{
 				{
 					Name:    "iperf",

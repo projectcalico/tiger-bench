@@ -540,6 +540,7 @@ func makeDNSPerfPod(nodename string, namespace string, podname string, image str
 		},
 		Spec: corev1.PodSpec{
 			AutomountServiceAccountToken: utils.BoolPtr(false),
+			EnableServiceLinks:           utils.BoolPtr(false),
 			SecurityContext: &corev1.PodSecurityContext{
 				RunAsNonRoot: utils.BoolPtr(true),
 				RunAsGroup:   utils.Int64Ptr(1000),
@@ -635,6 +636,7 @@ func makeDeployment(namespace string, depname string, replicas int32, hostnetwor
 				},
 				Spec: corev1.PodSpec{
 					AutomountServiceAccountToken: utils.BoolPtr(false),
+					EnableServiceLinks:           utils.BoolPtr(false),
 					SecurityContext: &corev1.PodSecurityContext{
 						RunAsNonRoot: utils.BoolPtr(true),
 						RunAsGroup:   utils.Int64Ptr(1000),
