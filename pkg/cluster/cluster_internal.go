@@ -597,7 +597,6 @@ func makeSvc(namespace string, depname, svcname string) corev1.Service {
 	return svc
 }
 
-
 func makeDeployment(namespace string, depname string, replicas int32, hostnetwork bool, image string, labels []string) appsv1.Deployment {
 	log.Debug("entering makeDeployment function")
 	depname = utils.SanitizeString(depname)
@@ -633,6 +632,7 @@ func makeDeployment(namespace string, depname string, replicas int32, hostnetwor
 				},
 				Spec: corev1.PodSpec{
 					AutomountServiceAccountToken: utils.BoolPtr(false),
+					EnableServiceLinks:           utils.BoolPtr(false),
 					SecurityContext: &corev1.PodSecurityContext{
 						RunAsNonRoot: utils.BoolPtr(true),
 						RunAsGroup:   utils.Int64Ptr(1000),

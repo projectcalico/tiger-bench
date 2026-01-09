@@ -304,6 +304,7 @@ func makePod(nodename string, namespace string, podname string, hostnetwork bool
 		},
 		Spec: corev1.PodSpec{
 			AutomountServiceAccountToken: utils.BoolPtr(false),
+			EnableServiceLinks:           utils.BoolPtr(false),
 			SecurityContext: &corev1.PodSecurityContext{
 				RunAsNonRoot: utils.BoolPtr(true),
 				RunAsGroup:   utils.Int64Ptr(1000),
@@ -356,6 +357,8 @@ func makeTestPod(nodename string, namespace string, podname string, hostnetwork 
 				RunAsGroup:   utils.Int64Ptr(1000),
 				RunAsUser:    utils.Int64Ptr(1000),
 			},
+			AutomountServiceAccountToken: utils.BoolPtr(false),
+			EnableServiceLinks:           utils.BoolPtr(false),
 			Containers: []corev1.Container{
 				{
 					Name:  "ttfr",
