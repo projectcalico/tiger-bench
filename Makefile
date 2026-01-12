@@ -4,7 +4,7 @@ IMAGE_NAMES = perf nginx ttfr tool
 IMAGES_PATH = images
 REGISTRY?=quay.io
 ORGANISATION?=tigeradev
-VERSION?=latest
+VERSION?=v0.6.0
 E2E_CLUSTER_NAME?=tb-e2e
 
 .PHONY: all build test clean tool test-tool e2e-test clean-ttfr clean-e2e
