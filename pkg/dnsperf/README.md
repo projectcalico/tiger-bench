@@ -17,7 +17,7 @@ Example Config:
     RunStress: false
     TestDNSPolicy: false
     numTargetPods: 10
-    targetType: service
+    targetDomain: www.example.com
 ```
 `testKind` sets the test to be a dnsperf test.
 Setting `Dataplane` causes the tool to reconfigure your cluster to use a particular dataplane.  Leave it blank to test whatever your cluster already uses.  Valid values: <blank>, `bpf`, `iptables`, `nftables`
@@ -29,7 +29,7 @@ Setting `Dataplane` causes the tool to reconfigure your cluster to use a particu
     `RunStress` - controls whether the test should run some control plane stress while the curl is executed - this is useful when testing DNS Policy, because it makes calico-node do work.
     `TestDNSPolicy` - controls whether or not the test should be a DNS policy test
     `numTargetPods` - controls the number of target pods that should be created.  Curls will be round-robined to the targets. Must be at least 1.
-    `targetType` - controls whether the target passed to curl is a pod FQDN or a service FQDN.  Valid values: `pod`, `service`
+    `targetDomain` - specifies the domain name to target with curl requests (e.g., `www.example.com`)
 
 
 ## Operation
@@ -64,7 +64,7 @@ Example result:
         "RunStress": false,
         "TestDNSPolicy": false,
         "NumTargetPods": 10,
-        "TargetType": "service"
+        "TargetDomain": "www.example.com"
       },
       "Perf": null,
       "TTFRConfig": null,

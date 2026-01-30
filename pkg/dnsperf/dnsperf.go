@@ -169,9 +169,8 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 		// kick off per-node threads to run tcpdump
 		for i, pod := range tcpdumppods {
 			go func(idx int, tcpdumpPod corev1.Pod) {
-				err = runTCPDump(testctx, clients, &tcpdumpPod, testpods[idx], testConfig.Duration+60)
-				if err != nil {
-					log.WithError(err).Error("failed to run tcpdump")
+				if e := runTCPDump(testctx, clients, &tcpdumpPod, testpods[idx], testConfig.Duration+60); e != nil {
+					log.WithError(e).Error("failed to run tcpdump")
 				}
 			}(i, pod)
 		}
@@ -350,7 +349,7 @@ func runTCPDump(ctx context.Context, clients config.Clients, pod *corev1.Pod, te
 	log.Infof("nic=%s", nic)
 
 	// run tcpdump command until timeout
-	cmd = fmt.Sprintf(`tcpdump -s0 -w dump.cap -i %s port 8080`, nic)
+	cmd = fmt.Sprintf(`tcpdump -s0 -w dump.cap -i %s tcp port 80 or tcp port 443`, nic)
 	var out string
 	out, _, err = utils.ExecCommandInPod(ctx, pod, cmd, timeout+30)
 	if err != nil {

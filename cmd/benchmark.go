@@ -146,11 +146,6 @@ func main() {
 				}
 			}
 		case config.TestKindDNSPerf:
-			// // Always create a basic policy to allow test pods to reach targets on port 8080
-			// err = policy.CreateTestPolicy(ctx, clients, testPolicyName, testConfig.TestNamespace, []int{8080})
-			// if err != nil {
-			// 	log.WithError(err).Fatal("failed to create dnsperf basic test policy")
-			// }
 			if testConfig.DNSPerf.TestDNSPolicy {
 				_, err = policy.GetOrCreateDNSPolicy(ctx, clients, dnsperf.MakeDNSPolicy(testConfig.TestNamespace, testPolicyName, testConfig.DNSPerf.NumDomains, testConfig.DNSPerf.TargetDomain))
 				if err != nil {

@@ -118,7 +118,7 @@ func patchFelixConfig(ctx context.Context, clients config.Clients, testConfig co
 	log.Infof("Current dataplane is %s", *dataplane)
 
 	switch *dataplane {
-	case operatorv1.LinuxDataplaneIptables:
+	case operatorv1.LinuxDataplaneIptables, operatorv1.LinuxDataplaneNftables:
 		switch dnsPolicyMode {
 		case "DelayDNSResponse":
 			v3PolicyMode = v3.DNSPolicyModeDelayDNSResponse
@@ -129,7 +129,7 @@ func patchFelixConfig(ctx context.Context, clients config.Clients, testConfig co
 		case "NoDelay":
 			v3PolicyMode = v3.DNSPolicyModeNoDelay
 		default:
-			return fmt.Errorf("invalid DNS policy mode %s for iptables dataplane", dnsPolicyMode)
+			return fmt.Errorf("invalid DNS policy mode %s for iptables/nftables dataplane", dnsPolicyMode)
 		}
 		felixconfig.Spec.DNSPolicyMode = &v3PolicyMode
 	case operatorv1.LinuxDataplaneBPF:
@@ -142,7 +142,10 @@ func patchFelixConfig(ctx context.Context, clients config.Clients, testConfig co
 			return fmt.Errorf("invalid DNS policy mode %s for BPF dataplane", dnsPolicyMode)
 		}
 		felixconfig.Spec.BPFDNSPolicyMode = &v3BPFDNSPolicyMode
+	default:
+		return fmt.Errorf("unknown dataplane %s", *dataplane)
 	}
+	updateTime := time.Now()
 	err = clients.CtrlClient.Update(ctx, felixconfig)
 	if err != nil {
 		log.WithError(err).Error("failed to update felixconfig")
@@ -163,7 +166,7 @@ func patchFelixConfig(ctx context.Context, clients config.Clients, testConfig co
 		log.Infof("felixconfig BPFDNSPolicyMode is now %s", *felixconfig.Spec.BPFDNSPolicyMode)
 	}
 	switch *dataplane {
-	case operatorv1.LinuxDataplaneIptables:
+	case operatorv1.LinuxDataplaneIptables, operatorv1.LinuxDataplaneNftables:
 		if felixconfig.Spec.DNSPolicyMode == nil || *felixconfig.Spec.DNSPolicyMode != v3PolicyMode {
 			return fmt.Errorf("failed to set DNSPolicyMode to %s", v3PolicyMode)
 		}
@@ -171,28 +174,31 @@ func patchFelixConfig(ctx context.Context, clients config.Clients, testConfig co
 		if felixconfig.Spec.BPFDNSPolicyMode == nil || *felixconfig.Spec.BPFDNSPolicyMode != v3BPFDNSPolicyMode {
 			return fmt.Errorf("failed to set BPFDNSPolicyMode to %s", v3BPFDNSPolicyMode)
 		}
+	default:
+		return fmt.Errorf("unknown dataplane %s", *dataplane)
 	}
 
-	// Check felix logs to verify mode change - if Inline mode is not possible, Felix will fall back to DelayDeniedPacket mode and log this.
+	// If we're using Inline, check felix logs to verify mode change - if Inline mode is not possible, Felix will fall back to DelayDeniedPacket mode and log this.
 	// The log will be: "Failed to load BPF DNS parser program. Maybe the kernel is old. Falling back to DelayDeniedPacket"
-	log.Info("Waiting for felix to log the DNS policy mode change")
-	err = waitForTigeraStatus(ctx, clients, 60, false)
-	if err != nil {
-		return fmt.Errorf("timed out waiting for tigerastatus after updating felixconfig")
-	}
-	log.Info("TigeraStatus is ready")
+	if dnsPolicyMode == "Inline" {
+		log.Info("Waiting for felix to log the DNS policy mode change")
+		err = waitForTigeraStatus(ctx, clients, 60, false)
+		if err != nil {
+			return fmt.Errorf("timed out waiting for tigerastatus after updating felixconfig")
+		}
+		log.Info("TigeraStatus is ready")
 
-	time.Sleep(10 * time.Second) // wait a bit for felix to start and log the change
+		time.Sleep(10 * time.Second) // wait a bit for felix to start and log the change
 
-	calicoNodeLogs, err := utils.GetCalicoNodeLogs(ctx, clients, "calico-system", "calico-node")
-	if err != nil {
-		log.WithError(err).Error("failed to get calico-node logs")
-		return err
-	}
-	// search calico-node logs for "Falling back to DelayDeniedPacket"
-	if strings.Contains(calicoNodeLogs, "Falling back to DelayDeniedPacket") {
-		return fmt.Errorf("Felix fell back to DelayDeniedPacket mode - Inline mode may not be supported on this kernel")
-	} else {
+		calicoNodeLogs, err := utils.GetCalicoNodeLogs(ctx, clients, "calico-system", "calico-node", updateTime)
+		if err != nil {
+			log.WithError(err).Error("failed to get calico-node logs")
+			return err
+		}
+		// search calico-node logs for "Falling back to DelayDeniedPacket"
+		if strings.Contains(calicoNodeLogs, "Falling back to DelayDeniedPacket") {
+			return fmt.Errorf("Felix fell back to DelayDeniedPacket mode - Inline mode may not be supported on this kernel")
+		}
 		log.Info("Felix is using Inline DNS policy mode")
 	}
 
