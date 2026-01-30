@@ -154,7 +154,7 @@ type DNSConfig struct {
 	RunStress     bool        `default:"true" validate:"omitempty"`
 	TestDNSPolicy bool        `default:"true" validate:"omitempty"`
 	NumTargetPods int         `default:"100" validate:"gte=1"`
-	TargetType    string      `default:"pod" validate:"omitempty,oneof=pod service"`
+	TargetDomain  string      `default:"www.example.com" validate:"omitempty,hostname"`
 }
 
 // TTFRConfig contains the configuration specific to TTFR tests.
@@ -248,8 +248,27 @@ func defaultAndValidate(cfg *Config) error {
 			tcfg.TestNamespace = "testns"
 		}
 		if tcfg.TestKind == "dnsperf" {
+			if tcfg.DNSPerf.TargetDomain == "" {
+				tcfg.DNSPerf.TargetDomain = "www.example.com"
+			}
 			if tcfg.DNSPerf.NumDomains < 0 {
 				return fmt.Errorf("NumDomains must be non-negative for a dnsperf test")
+			}
+			if tcfg.DNSPerf.TestDNSPolicy {
+				if tcfg.DNSPerf.Mode == DNSPerfModeUnset {
+					return fmt.Errorf("Mode must be set for a dnsperf test with TestDNSPolicy enabled")
+				}
+				if tcfg.DNSPerf.NumDomains < 0 {
+					return fmt.Errorf("NumDomains must be non-negative for a dnsperf test with TestDNSPolicy enabled")
+				}
+			}
+			if tcfg.Dataplane == DataPlaneBPF {
+				if tcfg.DNSPerf.Mode == DNSPerfModeDelayDeniedPacket {
+					return fmt.Errorf("DelayDeniedPacket mode is not supported on BPF dataplane")
+				}
+				if tcfg.DNSPerf.Mode == DNSPerfModeDelayDNSResponse {
+					return fmt.Errorf("DelayDNSResponse mode is not supported on BPF dataplane")
+				}
 			}
 		}
 		if tcfg.TestKind == "thruput-latency" || tcfg.TestKind == "iperf" {
@@ -274,16 +293,6 @@ func defaultAndValidate(cfg *Config) error {
 				}
 				if tcfg.Perf.TestPort > 65535 || tcfg.Perf.TestPort < 1 {
 					return fmt.Errorf("TestPort must be between 1 and 65535")
-				}
-			}
-		}
-		if tcfg.TestKind == "dnsperf" {
-			if tcfg.DNSPerf.TestDNSPolicy {
-				if tcfg.DNSPerf.Mode == DNSPerfModeUnset {
-					return fmt.Errorf("Mode must be set for a dnsperf test with TestDNSPolicy enabled")
-				}
-				if tcfg.DNSPerf.NumDomains < 0 {
-					return fmt.Errorf("NumDomains must be non-negative for a dnsperf test with TestDNSPolicy enabled")
 				}
 			}
 		}

@@ -25,6 +25,7 @@ import (
 
 	"github.com/projectcalico/tiger-bench/pkg/config"
 	"github.com/sethvargo/go-retry"
+	v3 "github.com/tigera/api/pkg/apis/projectcalico/v3"
 
 	log "github.com/sirupsen/logrus"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -234,6 +235,32 @@ func DeleteNetPolsInNamespace(ctx context.Context, clients config.Clients, names
 				log.Infof("didn't find existing network policy %s", netpol.Name)
 			} else {
 				log.WithError(err).Errorf("failed to delete network policy %v", netpol.Name)
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// DeleteCalicoNetworkPoliciesInNamespace deletes all Calico network policies in a namespace
+func DeleteCalicoNetworkPoliciesInNamespace(ctx context.Context, clients config.Clients, namespace string) error {
+	log.Debug("Entering DeleteCalicoNetworkPoliciesInNamespace function")
+
+	calicoNetpols := &v3.NetworkPolicyList{}
+	err := clients.CtrlClient.List(ctx, calicoNetpols, ctrlclient.InNamespace(namespace))
+	if err != nil {
+		log.WithError(err).Error("failed to list Calico network policies")
+		return err
+	}
+
+	for _, netpol := range calicoNetpols.Items {
+		log.Debug("Deleting Calico network policy: ", netpol.Name)
+		err = clients.CtrlClient.Delete(ctx, &netpol)
+		if err != nil {
+			if ctrlclient.IgnoreNotFound(err) == nil {
+				log.Infof("didn't find existing Calico network policy %s", netpol.Name)
+			} else {
+				log.WithError(err).Errorf("failed to delete Calico network policy %v", netpol.Name)
 				return err
 			}
 		}
@@ -467,6 +494,37 @@ func GetPodLogs(ctx context.Context, clients config.Clients, podName string, nam
 		return "", err
 	}
 	return buf.String(), nil
+}
+
+// GetCalicoNodeLogs retrieves logs from the calico-node container in calico-node pods
+func GetCalicoNodeLogs(ctx context.Context, clients config.Clients, namespace string, daemonSetName string) (string, error) {
+    log.Debug("Entering GetCalicoNodeLogs function")
+
+    // List pods in the namespace with the daemonset label
+    listOpts := metav1.ListOptions{
+        LabelSelector: fmt.Sprintf("k8s-app=%s", daemonSetName),
+    }
+    podList, err := clients.Clientset.CoreV1().Pods(namespace).List(ctx, listOpts)
+    if err != nil {
+        log.WithError(err).Error("failed to list calico-node pods")
+        return "", err
+    }
+
+    if len(podList.Items) == 0 {
+        return "", fmt.Errorf("no pods found for daemonset %s in namespace %s", daemonSetName, namespace)
+    }
+
+	combinedLogs := ""
+    // Get logs from each pod
+	for _, pod := range podList.Items {
+		logs, err := GetPodLogs(ctx, clients, pod.Name, namespace)
+		if err != nil {
+			return "", err
+		}
+		combinedLogs += logs
+	}
+
+	return combinedLogs, nil
 }
 
 // IsPodRunning checks if a pod is running

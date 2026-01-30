@@ -58,12 +58,12 @@ type Results struct {
 }
 
 // MakeDNSPolicy Makes a large DNS policy with a fixed bunch of domains and some generated ones
-func MakeDNSPolicy(namespace string, name string, numDomains int) v3.NetworkPolicy {
+func MakeDNSPolicy(namespace string, name string, numDomains int, targetDomain string) v3.NetworkPolicy {
 	udp := numorstring.ProtocolFromString("UDP")
 	orderOne := float64(1)
 
 	var testdomains = []string{
-		"*.test.pod.cluster.local",
+		targetDomain,
 	}
 
 	// Add the real domain we need to test against
@@ -146,50 +146,14 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 	if err != nil {
 		return &results, err
 	}
-	// setup target pods
-	thisname := fmt.Sprintf("headless%d", 0)
-	_, err = utils.GetOrCreateDeployment(ctx, clients,
-		makeDeployment(
-			testConfig.TestNamespace,
-			thisname,
-			int32(testConfig.DNSPerf.NumTargetPods),
-			false,
-			[]string{"infrastructure"},
-			webServerImage,
-			[]string{},
-		),
-	)
-	if err != nil {
-		return &results, err
-	}
-
-	_, err = utils.WaitForTestPods(ctx, clients, testConfig.TestNamespace, "app=dnsperf")
-	if err != nil {
-		return &results, err
-	}
 
 	var testdomains []string
-	if testConfig.DNSPerf.TargetType == "pod" {
-		log.Info("Using pod FQDNs as targets")
-		testdomains, err = getPodFQDNs(ctx, clients, testConfig.TestNamespace)
-		if err != nil {
-			return &results, err
-		}
+	if testConfig.DNSPerf.TargetDomain != "" {
+		log.Infof("Using external target URL: %s", testConfig.DNSPerf.TargetDomain)
+		testdomains = []string{testConfig.DNSPerf.TargetDomain}
 	} else {
-		log.Info("Using service FQDNs as targets")
-		svcs := corev1.ServiceList{}
-		err := clients.CtrlClient.List(ctx, &svcs, ctrlclient.InNamespace(testConfig.TestNamespace))
-		if err != nil {
-			log.WithError(err).Error("failed to list services")
-			return &results, err
-		}
-		for _, svc := range svcs.Items {
-			testdomains = append(testdomains, fmt.Sprintf("%s.%s.svc.cluster.local", svc.Name, testConfig.TestNamespace))
-		}
-	}
-	if len(testdomains) == 0 {
-		log.Info("No test domains found, skipping test")
-		return &results, fmt.Errorf("no test domains found")
+		log.Error("TargetDomain is required but not specified")
+		return &results, fmt.Errorf("TargetDomain is required for DNS performance tests")
 	}
 
 	err = checkTestPods(ctx, clients, testpods)
@@ -204,12 +168,12 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 	if testConfig.DNSPerf.TestDNSPolicy {
 		// kick off per-node threads to run tcpdump
 		for i, pod := range tcpdumppods {
-			go func() {
-				err = runTCPDump(testctx, clients, &pod, testpods[i], testConfig.Duration+60)
+			go func(idx int, tcpdumpPod corev1.Pod) {
+				err = runTCPDump(testctx, clients, &tcpdumpPod, testpods[idx], testConfig.Duration+60)
 				if err != nil {
 					log.WithError(err).Error("failed to run tcpdump")
 				}
-			}()
+			}(i, pod)
 		}
 		log.Info("tcpdump threads started")
 	}
@@ -223,12 +187,12 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 	var wg sync.WaitGroup
 	for _, pod := range testpods {
 		wg.Add(1)
-		go func() {
+		go func(testPod corev1.Pod) {
 			defer wg.Done()
 			i := 0
 			for {
 				domain := testdomains[i%(len(testdomains))]
-				result, err := runDNSPerfTest(testctx, &pod, domain)
+				result, err := runDNSPerfTest(testctx, &testPod, domain)
 				if testctx.Err() != nil {
 					// Probably ctx expiry or cancellation, don't append result or log errors in this case
 					break
@@ -244,7 +208,7 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 				log.Debugf("current test context: %+v", testctx)
 				i++
 			}
-		}()
+		}(pod)
 	}
 	wg.Wait()
 
@@ -265,25 +229,6 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 	}
 	log.Infof("Results: %+v", results)
 	return &results, nil
-}
-
-func getPodFQDNs(ctx context.Context, clients config.Clients, namespace string) ([]string, error) {
-	log.Debug("entering getPodFQDNs function")
-	var fqdns []string
-	podlist := &corev1.PodList{}
-	err := clients.CtrlClient.List(ctx, podlist, ctrlclient.InNamespace(namespace))
-	if err != nil {
-		return fqdns, fmt.Errorf("failed to list pods")
-	}
-
-	for _, pod := range podlist.Items {
-		if strings.Contains(pod.ObjectMeta.Name, "headless") {
-			podname := utils.SanitizeString(pod.Status.PodIP)
-			fqdns = append(fqdns, fmt.Sprintf("%s.%s.pod.cluster.local", podname, namespace))
-		}
-	}
-	log.Infof("fqdns: %+v", fqdns)
-	return fqdns, nil
 }
 
 func processResults(rawresults []CurlResult) Results {
@@ -339,10 +284,10 @@ func runDNSPerfTest(ctx context.Context, srcPod *corev1.Pod, target string) (Cur
 	result.Target = target
 	result.Success = true
 	cmdfrag := `curl -m 8 -w '{"time_lookup": %{time_namelookup}, "time_connect": %{time_connect}}\n' -s -o /dev/null`
-	cmd := fmt.Sprintf("%s %s:8080", cmdfrag, target)
+	cmd := fmt.Sprintf("%s %s", cmdfrag, target)
 	stdout, _, err := utils.ExecCommandInPod(ctx, srcPod, cmd, 10)
 	if err != nil {
-		if ctx.Err() == nil {  // Only log error if context is still valid
+		if ctx.Err() == nil { // Only log error if context is still valid
 			log.WithError(err).Error("failed to run curl command")
 		}
 		result.Success = false
@@ -397,12 +342,11 @@ func runTCPDump(ctx context.Context, clients config.Clients, pod *corev1.Pod, te
 		log.WithError(err).Errorf("failed to run ip route command: %s", stderr)
 		return err
 	}
-	nic = strings.Map(func(r rune) rune {
-		if unicode.IsPrint(r) {
-			return r
-		}
-		return -1
-	}, nic)
+	nic = strings.TrimSpace(nic)
+	if nic == "" {
+		log.Error("failed to find interface for pod - interface name is empty")
+		return fmt.Errorf("could not determine interface for pod %s", testPod.Status.PodIP)
+	}
 	log.Infof("nic=%s", nic)
 
 	// run tcpdump command until timeout
@@ -528,6 +472,13 @@ func DeployDNSPerfPods(ctx context.Context, clients config.Clients, hostnet bool
 
 func makeDNSPerfPod(nodename string, namespace string, podname string, image string, hostnetwork bool) corev1.Pod {
 	podname = utils.SanitizeString(podname)
+	runAsUser := int64(1000)
+	runAsGroup := int64(1000)
+	if hostnetwork {
+		// tcpdump needs to run as root
+		runAsUser = 0
+		runAsGroup = 0
+	}
 	pod := corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Labels: map[string]string{
@@ -541,9 +492,9 @@ func makeDNSPerfPod(nodename string, namespace string, podname string, image str
 		Spec: corev1.PodSpec{
 			AutomountServiceAccountToken: utils.BoolPtr(false),
 			SecurityContext: &corev1.PodSecurityContext{
-				RunAsNonRoot: utils.BoolPtr(true),
-				RunAsGroup:   utils.Int64Ptr(1000),
-				RunAsUser:    utils.Int64Ptr(1000),
+				RunAsNonRoot: utils.BoolPtr(!hostnetwork), // tcpdump needs to run as root
+				RunAsGroup:   utils.Int64Ptr(runAsGroup),
+				RunAsUser:    utils.Int64Ptr(runAsUser),
 				SeccompProfile: &corev1.SeccompProfile{
 					Type: corev1.SeccompProfileTypeRuntimeDefault,
 				},
@@ -562,6 +513,12 @@ func makeDNSPerfPod(nodename string, namespace string, podname string, image str
 						ReadOnlyRootFilesystem:   utils.BoolPtr(false),
 						Capabilities: &corev1.Capabilities{
 							Drop: []corev1.Capability{"ALL"},
+							Add: func() []corev1.Capability {
+								if hostnetwork {
+									return []corev1.Capability{"NET_RAW", "NET_ADMIN"}
+								}
+								return nil
+							}(),
 						},
 					},
 					ImagePullPolicy: corev1.PullAlways,
@@ -574,35 +531,6 @@ func makeDNSPerfPod(nodename string, namespace string, podname string, image str
 	}
 	return pod
 }
-
-// func makeHeadlessSvc(namespace string, svcname string, labels map[string]string) corev1.Service {
-// 	svcname = utils.SanitizeString(svcname)
-// 	return corev1.Service{
-// 		ObjectMeta: metav1.ObjectMeta{
-// 			Labels:    labels,
-// 			Name:      svcname,
-// 			Namespace: namespace,
-// 		},
-// 		Spec: corev1.ServiceSpec{
-// 			ClusterIP: "None",
-// 			Selector:  labels,
-// 			Ports: []corev1.ServicePort{
-// 				{
-// 					Protocol:   "TCP",
-// 					Port:       80,
-// 					TargetPort: intstr.FromInt(80),
-// 					Name:       "http",
-// 				},
-// 				{
-// 					Protocol:   "TCP",
-// 					Port:       443,
-// 					TargetPort: intstr.FromInt(443),
-// 					Name:       "https",
-// 				},
-// 			},
-// 		},
-// 	}
-// }
 
 func makeDeployment(namespace string, depname string, replicas int32, hostnetwork bool, nodelist []string, image string, args []string) appsv1.Deployment {
 	depname = utils.SanitizeString(depname)
@@ -690,6 +618,10 @@ func makeDeployment(namespace string, depname string, replicas int32, hostnetwor
 func scaleDeploymentLoop(ctx context.Context, clients config.Clients, deployment appsv1.Deployment, size int32, sleeptime time.Duration) {
 	log.Debug("entering scaleDeployment function")
 	for {
+		if ctx.Err() != nil {
+			log.Info("Context expired. Quitting scaleDeploymentLoop")
+			return
+		}
 		err := utils.ScaleDeployment(ctx, clients, deployment, size)
 		if err != nil {
 			log.Warning("failed to scale deployment	up")
@@ -699,6 +631,10 @@ func scaleDeploymentLoop(ctx context.Context, clients config.Clients, deployment
 			return
 		}
 		time.Sleep(sleeptime)
+		if ctx.Err() != nil {
+			log.Info("Context expired. Quitting scaleDeploymentLoop")
+			return
+		}
 		err = utils.ScaleDeployment(ctx, clients, deployment, 0)
 		if err != nil {
 			log.Warning("failed to scale deployment	up")

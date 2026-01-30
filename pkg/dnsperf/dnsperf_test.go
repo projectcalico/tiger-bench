@@ -367,8 +367,9 @@ func TestProcessResults(t *testing.T) {
 func TestMakeDNSPolicy(t *testing.T) {
 	namespace := "test-namespace"
 	name := "test-policy"
+	targetDomain := "www.example.com"
 	var testdomains = []string{
-		"*.test.pod.cluster.local",
+		targetDomain,
 	}
 	orderOne := float64(1)
 	udp := numorstring.ProtocolFromString("UDP")
@@ -406,21 +407,21 @@ func TestMakeDNSPolicy(t *testing.T) {
 
 	// Test case 1: One domain
 	numDomains := 1
-	result := MakeDNSPolicy(namespace, name, numDomains)
+	result := MakeDNSPolicy(namespace, name, numDomains, targetDomain)
 	if !reflect.DeepEqual(result, expected) {
 		t.Errorf("MakeDNSPolicy() failed, expected: %v, got: %v", expected, result)
 	}
 
 	// Test case 2: Zero domains
 	numDomains = 0
-	result = MakeDNSPolicy(namespace, name, numDomains)
+	result = MakeDNSPolicy(namespace, name, numDomains, targetDomain)
 	if !reflect.DeepEqual(result, expected) {
 		t.Errorf("MakeDNSPolicy() failed, expected: %v, got: %v", expected, result)
 	}
 
 	// Test case 2: 50 domains
 	numDomains = 50
-	result = MakeDNSPolicy(namespace, name, numDomains)
+	result = MakeDNSPolicy(namespace, name, numDomains, targetDomain)
 	if len(result.Spec.Egress[1].Destination.Domains) != 50 {
 		t.Errorf("MakeDNSPolicy() failed, expected: %v, got: %v", numDomains, len(result.Spec.Egress[1].Destination.Domains))
 	}
