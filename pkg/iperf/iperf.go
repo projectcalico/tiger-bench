@@ -336,13 +336,13 @@ func makePod(nodename string, namespace string, podname string, hostnetwork bool
 					Type: corev1.SeccompProfileTypeRuntimeDefault,
 				},
 			},
+			EnableServiceLinks: utils.BoolPtr(false),
 			Containers: []corev1.Container{
 				{
-					Name:  "iperf",
-					Image: image,
+					Name:    "iperf",
+					Image:   image,
+					Command: []string{"/bin/sh", "-c"},
 					Args: []string{
-						"/bin/sh",
-						"-c",
 						command,
 					},
 					SecurityContext: &corev1.SecurityContext{
@@ -353,7 +353,7 @@ func makePod(nodename string, namespace string, podname string, hostnetwork bool
 							Drop: []corev1.Capability{"ALL"},
 						},
 					},
-					ImagePullPolicy: corev1.PullAlways,
+					ImagePullPolicy: corev1.PullIfNotPresent,
 					Ports: []corev1.ContainerPort{
 						{
 							Name:          "test-port",

@@ -33,11 +33,10 @@ import (
 	"github.com/projectcalico/tiger-bench/pkg/utils"
 )
 
-// DeployPolicies deploys policies to the cluster.
+// DeployPolicies deploys policies to the cluster which apply to all the test pods.
 func DeployPolicies(ctx context.Context, clients config.Clients, numPolicies int, namespace string) error {
 	log.Debug("Entering deployPolicies function")
 	log.Infof("Deploying %d policies", numPolicies)
-	const numThreads = 20
 
 	_, err := utils.GetOrCreateNS(ctx, clients, namespace)
 	if err != nil {
@@ -52,9 +51,39 @@ func DeployPolicies(ctx context.Context, clients config.Clients, numPolicies int
 	}
 	if numPolicies > currentNumPolicies {
 		// If we do not have enough policies, create them
+		podSelector := metav1.LabelSelector{}
+
+		return BulkCreatePolicies(ctx, clients, namespace, "policy", podSelector, nil, currentNumPolicies, numPolicies)
+
+	} else if numPolicies < currentNumPolicies {
+		// if we have too many policies, delete some
+
+		return BulkDeletePolicies(ctx, clients, namespace, "policy", currentNumPolicies, numPolicies)
+	}
+	return nil
+}
+
+// DeployIdlePolicies deploys policies to the cluster which do NOT apply to the test pods
+func DeployIdlePolicies(ctx context.Context, clients config.Clients, numPolicies int, namespace string) error {
+	log.Debug("Entering deployIdlePolicies function")
+	log.Infof("Deploying %d idle policies", numPolicies)
+
+	_, err := utils.GetOrCreateNS(ctx, clients, namespace)
+	if err != nil {
+		return err
+	}
+
+	// deploy policies
+	currentNumPolicies, err := countPolicies(ctx, clients, namespace, "idle-policy-")
+	log.Info("Current number of policies: ", currentNumPolicies)
+	if err != nil {
+		return err
+	}
+	if numPolicies > currentNumPolicies {
+		// If we do not have enough policies, create them
 		podSelector := metav1.LabelSelector{
 			MatchExpressions: []metav1.LabelSelectorRequirement{
-				{Key: "app", Operator: metav1.LabelSelectorOpExists},
+				{Key: "donotmatchanything", Operator: metav1.LabelSelectorOpExists},
 			},
 		}
 
@@ -63,74 +92,108 @@ func DeployPolicies(ctx context.Context, clients config.Clients, numPolicies int
 				PodSelector: &podSelector,
 			},
 		}
-
-		// Spin up a channel with multiple threads to create policies, because a single thread is limited to 5 per second
-		var policyIndexes []int
-		for i := currentNumPolicies; i < numPolicies; i++ {
-			policyIndexes = append(policyIndexes, i)
-		}
-		var wg sync.WaitGroup
-		errors := make([]error, len(policyIndexes))
-		sem := make(chan struct{}, numThreads)
-		for i, v := range policyIndexes {
-			name := fmt.Sprintf("policy-%.5d", v)
-			sem <- struct{}{}
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				defer func() { <-sem }()
-				errors[i] = createPolicy(ctx, clients, name, namespace, podSelector, ingressPeers, []int{80})
-			}()
-		}
-		wg.Wait()
-		// we now have a list of errors, let's see if they all succeeded
-		log.Debugf("Errors: %v+", errors)
-		var overallError error
-		for _, err := range errors {
-			if err != nil {
-				overallError = err
-				break
-			}
-		}
-		log.Debugf("overallError: %v", overallError)
-		return overallError
+		return BulkCreatePolicies(ctx, clients, namespace, "idle-policy", podSelector, ingressPeers, currentNumPolicies, numPolicies)
 
 	} else if numPolicies < currentNumPolicies {
 		// if we have too many policies, delete some
-		// Spin up a channel with multiple threads to delete policies, because a single thread is limited to 5 per second
 
-		// make a list of ints from currentNumPolicies to numPolicies
-		var policyIndexes []int
-		for i := currentNumPolicies-1; i >= numPolicies; i-- {
-			policyIndexes = append(policyIndexes, i)
-		}
-		var wg sync.WaitGroup
-		errors := make([]error, len(policyIndexes))
-		sem := make(chan struct{}, numThreads)
-		for i, v := range policyIndexes {
-			name := fmt.Sprintf("policy-%.5d", v)
-			sem <- struct{}{}
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				defer func() { <-sem }()
-				errors[i] = DeletePolicy(ctx, clients, name, namespace)
-			}()
-		}
-		wg.Wait()
-		// we now have a list of errors, let's see if they all succeeded
-		log.Debugf("Errors: %v+", errors)
-		var overallError error
-		for _, err := range errors {
-			if err != nil {
-				overallError = err
-				break
-			}
-		}
-		log.Debugf("overallError: %v", overallError)
-		return overallError
+		return BulkDeletePolicies(ctx, clients, namespace, "idle-policy", currentNumPolicies, numPolicies)
 	}
 	return nil
+}
+
+// BulkCreatePolicies creates multiple policies in bulk
+func BulkCreatePolicies(ctx context.Context, clients config.Clients, namespace string, prefix string, podSelector metav1.LabelSelector, ingressPeers []networkingv1.NetworkPolicyPeer, currentNumPolicies int, numPolicies int) error {
+	// Spin up a channel with multiple threads to create policies, because a single thread is limited to 5 per second
+	const numThreads = 20
+	var policyIndexes []int
+	for i := currentNumPolicies; i < numPolicies; i++ {
+		policyIndexes = append(policyIndexes, i)
+	}
+	var wg sync.WaitGroup
+	errors := make([]error, len(policyIndexes))
+	sem := make(chan struct{}, numThreads)
+	for i, v := range policyIndexes {
+		name := fmt.Sprintf("%s-%.5d", prefix, v)
+		peers := ingressPeers
+		if peers == nil {
+			peers = []networkingv1.NetworkPolicyPeer{
+				{
+					PodSelector: &metav1.LabelSelector{
+						MatchExpressions: []metav1.LabelSelectorRequirement{
+							{Key: fmt.Sprintf("policy-%d", v), Operator: metav1.LabelSelectorOpExists},
+						},
+					},
+				},
+			}
+		}
+		podMatch := podSelector.MatchExpressions
+		selector := podSelector
+		if podMatch == nil {
+			selector = metav1.LabelSelector{
+				MatchExpressions: []metav1.LabelSelectorRequirement{
+					{Key: fmt.Sprintf("policy-%d", v), Operator: metav1.LabelSelectorOpExists},
+					{Key: fmt.Sprintf("blah-%d", v), Operator: metav1.LabelSelectorOpDoesNotExist},
+				},
+			}
+		}
+		sem <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			errors[i] = createPolicy(ctx, clients, name, namespace, selector, peers, []int{80})
+		}()
+	}
+	wg.Wait()
+	// we now have a list of errors, let's see if they all succeeded
+	log.Debugf("Errors: %v+", errors)
+	var overallError error
+	for _, err := range errors {
+		if err != nil {
+			overallError = err
+			break
+		}
+	}
+	log.Debugf("overallError: %v", overallError)
+	return overallError
+}
+
+// BulkDeletePolicies deletes multiple policies in bulk
+func BulkDeletePolicies(ctx context.Context, clients config.Clients, namespace string, prefix string, currentNumPolicies int, numPolicies int) error {
+	const numThreads = 20
+	// Spin up a channel with multiple threads to delete policies, because a single thread is limited to 5 per second
+
+	// make a list of ints from currentNumPolicies to numPolicies
+	var policyIndexes []int
+	for i := currentNumPolicies - 1; i >= numPolicies; i-- {
+		policyIndexes = append(policyIndexes, i)
+	}
+	var wg sync.WaitGroup
+	errors := make([]error, len(policyIndexes))
+	sem := make(chan struct{}, numThreads)
+	for i, v := range policyIndexes {
+		name := fmt.Sprintf("%s-%.5d", prefix, v)
+		sem <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			errors[i] = DeletePolicy(ctx, clients, name, namespace)
+		}()
+	}
+	wg.Wait()
+	// we now have a list of errors, let's see if they all succeeded
+	log.Debugf("Errors: %v+", errors)
+	var overallError error
+	for _, err := range errors {
+		if err != nil {
+			overallError = err
+			break
+		}
+	}
+	log.Debugf("overallError: %v", overallError)
+	return overallError
 }
 
 // CreateTestPolicy creates the policies needed to ensure test pods can run the test

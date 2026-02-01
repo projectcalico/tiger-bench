@@ -1,5 +1,6 @@
 - testKind: thruput-latency
   numPolicies: 5
+  numIdlePolicies: 3
   numServices: 10
   numPods: 7
   duration: 10
@@ -9,6 +10,7 @@
 
 - testKind: iperf
   numPolicies: 6
+  numIdlePolicies: 2
   numServices: 11
   numPods: 6
   duration: 10

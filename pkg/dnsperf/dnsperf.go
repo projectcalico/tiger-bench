@@ -490,6 +490,7 @@ func makeDNSPerfPod(nodename string, namespace string, podname string, image str
 		},
 		Spec: corev1.PodSpec{
 			AutomountServiceAccountToken: utils.BoolPtr(false),
+			EnableServiceLinks:           utils.BoolPtr(false),
 			SecurityContext: &corev1.PodSecurityContext{
 				RunAsNonRoot: utils.BoolPtr(!hostnetwork), // tcpdump needs to run as root
 				RunAsGroup:   utils.Int64Ptr(runAsGroup),
@@ -500,10 +501,10 @@ func makeDNSPerfPod(nodename string, namespace string, podname string, image str
 			},
 			Containers: []corev1.Container{
 				{
-					Name:  "dnsperf",
-					Image: image,
+					Name:    "dnsperf",
+					Image:   image,
+					Command: []string{"/bin/sh", "-c"},
 					Args: []string{
-						"sh", "-c",
 						"while true; do echo `date`: MARK; sleep 10; done",
 					},
 					SecurityContext: &corev1.SecurityContext{
@@ -520,7 +521,7 @@ func makeDNSPerfPod(nodename string, namespace string, podname string, image str
 							}(),
 						},
 					},
-					ImagePullPolicy: corev1.PullAlways,
+					ImagePullPolicy: corev1.PullIfNotPresent,
 				},
 			},
 			NodeName:      nodename,
@@ -562,6 +563,7 @@ func makeDeployment(namespace string, depname string, replicas int32, hostnetwor
 				},
 				Spec: corev1.PodSpec{
 					AutomountServiceAccountToken: utils.BoolPtr(false),
+					EnableServiceLinks:           utils.BoolPtr(false),
 					SecurityContext: &corev1.PodSecurityContext{
 						RunAsNonRoot: utils.BoolPtr(true),
 						RunAsGroup:   utils.Int64Ptr(1000),
@@ -590,7 +592,7 @@ func makeDeployment(namespace string, depname string, replicas int32, hostnetwor
 									Protocol:      corev1.ProtocolTCP,
 								},
 							},
-							ImagePullPolicy: corev1.PullAlways,
+							ImagePullPolicy: corev1.PullIfNotPresent,
 						},
 					},
 					HostNetwork: hostnetwork,

@@ -365,12 +365,13 @@ func makeQperfPod(nodename string, namespace string, podname string, image strin
 					Type: corev1.SeccompProfileTypeRuntimeDefault,
 				},
 			},
+			EnableServiceLinks: utils.BoolPtr(false),
 			Containers: []corev1.Container{
 				{
-					Name:  "qperf",
-					Image: image,
+					Name:    "qperf",
+					Image:   image,
+					Command: []string{"/usr/bin/qperf"},
 					Args: []string{
-						"qperf",
 						"-lp",
 						controlPortStr,
 					},

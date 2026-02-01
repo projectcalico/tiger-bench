@@ -3,6 +3,8 @@ name: ci
 
 on:
   push:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
 
 env:
   GO_VERSION: 1.24.3
@@ -12,9 +14,12 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' || (github.event_name == 'pull_request_target' && contains(github.event.pull_request.labels.*.name, 'safe to test'))
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Setup Go ${{ env.GO_VERSION }}
         uses: actions/setup-go@v5
         with:
@@ -33,7 +38,7 @@ jobs:
         run: make e2e-test
   deploy:
     needs: test
-    if: ${{ success() }}
+    if: ${{ success() }} && github.event_name == 'push'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -53,6 +58,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Login to Docker registry
         uses: docker/login-action@v3
         with:
