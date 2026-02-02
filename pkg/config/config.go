@@ -155,7 +155,6 @@ type DNSConfig struct {
 	Mode          DNSPerfMode `validate:"omitempty,oneof=Inline NoDelay DelayDeniedPacket DelayDNSResponse"`
 	RunStress     bool        `default:"true" validate:"omitempty"`
 	TestDNSPolicy bool        `default:"true" validate:"omitempty"`
-	NumTargetPods int         `default:"100" validate:"gte=1"`
 	TargetDomain  string      `default:"www.example.com" validate:"omitempty,hostname"`
 }
 

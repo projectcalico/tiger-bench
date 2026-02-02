@@ -142,10 +142,14 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 	if err != nil {
 		return &results, err
 	}
-	// setup tcpdump on nodes (deploy network tools as host-networked daemonset, figure out main interface, run tcpdump)
-	tcpdumppods, err := DeployDNSPerfPods(ctx, clients, true, "tcpdump", testConfig.TestNamespace, perfImage)
-	if err != nil {
-		return &results, err
+
+	// setup tcpdump on nodes only if TestDNSPolicy is enabled (deploy network tools as host-networked daemonset, figure out main interface, run tcpdump)
+	var tcpdumppods []corev1.Pod
+	if testConfig.DNSPerf.TestDNSPolicy {
+		tcpdumppods, err = DeployDNSPerfPods(ctx, clients, true, "tcpdump", testConfig.TestNamespace, perfImage)
+		if err != nil {
+			return &results, err
+		}
 	}
 
 	var testdomains []string
@@ -183,8 +187,10 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 	}
 
 	// kick off per-node threads to run curl commands
-	var rawresults []CurlResult
+	resultsChan := make(chan CurlResult, len(testpods)*10)
 	var wg sync.WaitGroup
+
+	// Launch worker goroutines that send results to channel
 	for _, pod := range testpods {
 		wg.Add(1)
 		go func(testPod corev1.Pod) {
@@ -203,14 +209,25 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 					// Since Connectime includes LookupTime, we need to subtract LookupTime from ConnectTime to get the actual connect time
 					result.ConnectTime = result.ConnectTime - result.LookupTime
 				}
-				log.Debugf("appending result: %+v", result)
-				rawresults = append(rawresults, result)
+				log.Debugf("sending result: %+v", result)
+				resultsChan <- result
 				log.Debugf("current test context: %+v", testctx)
 				i++
 			}
 		}(pod)
 	}
-	wg.Wait()
+
+	// Close channel when all workers are done
+	go func() {
+		wg.Wait()
+		close(resultsChan)
+	}()
+
+	// Aggregate results from channel in single goroutine
+	var rawresults []CurlResult
+	for result := range resultsChan {
+		rawresults = append(rawresults, result)
+	}
 
 	log.Debugf("rawresults: %+v", rawresults)
 	results = processResults(rawresults)

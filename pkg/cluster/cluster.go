@@ -210,13 +210,13 @@ func patchFelixConfig(ctx context.Context, clients config.Clients, testConfig co
 
 		time.Sleep(10 * time.Second) // wait a bit for felix to start and log the change
 
-		calicoNodeLogs, err := utils.GetCalicoNodeLogs(ctx, clients, "calico-system", "calico-node", updateTime)
+		calicoNodeLogs, err := utils.GetCalicoNodeLogs(ctx, clients, "calico-system", "calico-node", updateTime, "Falling back to DelayDeniedPacket")
 		if err != nil {
 			log.WithError(err).Error("failed to get calico-node logs")
 			return err
 		}
 		// search calico-node logs for "Falling back to DelayDeniedPacket"
-		if strings.Contains(calicoNodeLogs, "Falling back to DelayDeniedPacket") {
+		if calicoNodeLogs != "" {
 			return fmt.Errorf("Felix fell back to DelayDeniedPacket mode - Inline mode may not be supported on this kernel")
 		}
 		log.Info("Felix is using Inline DNS policy mode")

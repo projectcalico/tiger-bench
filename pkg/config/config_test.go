@@ -340,7 +340,6 @@ func TestDNSMissingMode(t *testing.T) {
   dnsperf:
     testDNSPolicy: true
     NumDomains: 4
-    NumTargetPods: 10
 `
 	filePath := "/tmp/test_configs.yaml"
 	err := os.WriteFile(filePath, []byte(fileContent), 0644)
@@ -354,6 +353,7 @@ func TestDNSMissingMode(t *testing.T) {
 	assert.Contains(t, err.Error(), "Mode must be set for a dnsperf test with TestDNSPolicy enabled")
 }
 func TestDNSMissingNumDomains(t *testing.T) {
+	// This test verifies that NumDomains defaults to 0 which is valid
 	fileContent := `
 - testKind: dnsperf
   dnsperf:
@@ -367,8 +367,8 @@ func TestDNSMissingNumDomains(t *testing.T) {
 	var cfg Config
 	cfg.TestConfigFile = filePath
 	err = loadTestConfigsFromFile(&cfg)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "Field validation for 'NumTargetPods' failed on the 'gte' tag")
+	require.NoError(t, err)
+	assert.Equal(t, 0, cfg.TestConfigs[0].DNSPerf.NumDomains)
 }
 func TestDNSBasic(t *testing.T) {
 	fileContent := `
@@ -376,7 +376,6 @@ func TestDNSBasic(t *testing.T) {
   dnsperf:
     Mode: Inline
     NumDomains: 10
-    NumTargetPods: 5
 `
 	filePath := "/tmp/test_configs.yaml"
 	err := os.WriteFile(filePath, []byte(fileContent), 0644)
@@ -409,7 +408,6 @@ func TestDNSPerfValidModesWithIPTables(t *testing.T) {
   dnsperf:
     Mode: ` + string(mode) + `
     NumDomains: 10
-    NumTargetPods: 5
 `
 		filePath := "/tmp/test_configs.yaml"
 		err := os.WriteFile(filePath, []byte(fileContent), 0644)
@@ -501,7 +499,6 @@ func TestDNSPerfValidModesWithNftables(t *testing.T) {
   dnsperf:
     Mode: ` + string(mode) + `
     NumDomains: 10
-    NumTargetPods: 5
 `
 		filePath := "/tmp/test_configs.yaml"
 		err := os.WriteFile(filePath, []byte(fileContent), 0644)
@@ -525,7 +522,6 @@ func TestDNSPerfInvalidModesWithNftables(t *testing.T) {
   dnsperf:
     Mode: Inline
     NumDomains: 10
-    NumTargetPods: 5
 `
 	filePath := "/tmp/test_configs.yaml"
 	err := os.WriteFile(filePath, []byte(fileContent), 0644)
@@ -556,7 +552,6 @@ func TestDNSPerfValidModesWithUnsetDataplane(t *testing.T) {
   dnsperf:
     Mode: ` + string(mode) + `
     NumDomains: 10
-    NumTargetPods: 5
 `
 		filePath := "/tmp/test_configs.yaml"
 		err := os.WriteFile(filePath, []byte(fileContent), 0644)
@@ -570,4 +565,45 @@ func TestDNSPerfValidModesWithUnsetDataplane(t *testing.T) {
 			t.Errorf("Unset dataplane should support mode %q, but got error: %v", mode, err)
 		}
 	}
+}
+
+// TestTargetDomainDefault tests that TargetDomain defaults to www.example.com when not specified
+func TestTargetDomainDefault(t *testing.T) {
+	fileContent := `
+- testKind: dnsperf
+  dnsperf:
+    Mode: Inline
+    NumDomains: 10
+`
+	filePath := "/tmp/test_configs.yaml"
+	err := os.WriteFile(filePath, []byte(fileContent), 0644)
+	require.NoError(t, err)
+	defer os.Remove(filePath)
+
+	var cfg Config
+	cfg.TestConfigFile = filePath
+	err = loadTestConfigsFromFile(&cfg)
+	require.NoError(t, err)
+	assert.Equal(t, "www.example.com", cfg.TestConfigs[0].DNSPerf.TargetDomain)
+}
+
+// TestTargetDomainCustomValue tests that TargetDomain can be overridden
+func TestTargetDomainCustomValue(t *testing.T) {
+	fileContent := `
+- testKind: dnsperf
+  dnsperf:
+    Mode: Inline
+    NumDomains: 10
+    TargetDomain: custom.example.org
+`
+	filePath := "/tmp/test_configs.yaml"
+	err := os.WriteFile(filePath, []byte(fileContent), 0644)
+	require.NoError(t, err)
+	defer os.Remove(filePath)
+
+	var cfg Config
+	cfg.TestConfigFile = filePath
+	err = loadTestConfigsFromFile(&cfg)
+	require.NoError(t, err)
+	assert.Equal(t, "custom.example.org", cfg.TestConfigs[0].DNSPerf.TargetDomain)
 }

@@ -15,12 +15,12 @@
 package utils
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
-
 	"time"
 
 	"github.com/projectcalico/tiger-bench/pkg/config"
@@ -496,8 +496,8 @@ func GetPodLogs(ctx context.Context, clients config.Clients, podName string, nam
 	return buf.String(), nil
 }
 
-// GetCalicoNodeLogs retrieves logs from the calico-node container in calico-node pods
-func GetCalicoNodeLogs(ctx context.Context, clients config.Clients, namespace string, daemonSetName string, updateTime time.Time) (string, error) {
+// GetCalicoNodeLogs retrieves logs from the calico-node container in calico-node pods that contain matchText
+func GetCalicoNodeLogs(ctx context.Context, clients config.Clients, namespace string, daemonSetName string, updateTime time.Time, matchText string) (string, error) {
 	log.Debug("Entering GetCalicoNodeLogs function")
 
 	// List pods in the namespace with the daemonset label
@@ -527,11 +527,19 @@ func GetCalicoNodeLogs(ctx context.Context, clients config.Clients, namespace st
 			log.WithError(err).Error("failed to get calico-node logs")
 			return "", err
 		}
-		_, readErr := combinedLogs.ReadFrom(logs)
+		scanner := bufio.NewScanner(logs)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.Contains(line, matchText) {
+				combinedLogs.WriteString(line)
+				combinedLogs.WriteByte('\n')
+				log.Infof("Found log containing %s in pod %s", matchText, pod.Name)
+			}
+		}
 		_ = logs.Close()
-		if readErr != nil {
-			log.WithError(readErr).Error("failed to read calico-node logs")
-			return "", readErr
+		if scanErr := scanner.Err(); scanErr != nil {
+			log.WithError(scanErr).Error("failed to read calico-node logs")
+			return "", scanErr
 		}
 	}
 

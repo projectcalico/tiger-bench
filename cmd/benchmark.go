@@ -74,9 +74,13 @@ func main() {
 	)
 
 	// Validate test node prerequisites
-	err = validateTestNodes(ctx, clients, cfg.TestConfigs)
-	if err != nil {
-		log.WithError(err).Fatal("test node validation failed")
+	if clients.CtrlClient != nil {
+		err = validateTestNodes(ctx, clients, cfg.TestConfigs)
+		if err != nil {
+			log.WithError(err).Fatal("test node validation failed")
+		}
+	} else {
+		log.Warn("Skipping test node validation - no kubeconfig configured")
 	}
 
 	var benchmarkResults []results.Result

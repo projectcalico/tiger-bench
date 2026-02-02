@@ -1,10 +1,12 @@
 # DNSPerf tests
 
 This test has 2 use cases:
+
 - to test DNS Policy performance in Calico Enterprise clusters
 - to test the latency of a service using Curl
 
 Example Config:
+
 ```
 - testKind: dnsperf
   Dataplane: iptables
@@ -17,24 +19,25 @@ Example Config:
     runStress: false
     mode: Inline
     testDNSPolicy: true
-    numTargetPods: 10
     targetDomain: www.example.com
 ```
+
 `testKind` sets the test to be a dnsperf test.
-Setting `Dataplane` causes the tool to reconfigure your cluster to use a particular dataplane.  Leave it blank to test whatever your cluster already uses.  Valid values: <blank>, `bpf`, `iptables`, `nftables`
-`numServices` causes the tool to set up "standing config", which includes services.  This takes the form of 10 pods, each backing N services (where N is the number you set)
+Setting `Dataplane` causes the tool to reconfigure your cluster to use a particular dataplane. Leave it blank to test whatever your cluster already uses. Valid values: <blank>, `bpf`, `iptables`, `nftables`
+`numServices` causes the tool to set up "standing config", which includes services. This takes the form of 10 pods, each backing N services (where N is the number you set)
 `iterations` is not used by dnsperf tests.
 `duration` defines the length of time the test will be repeated for
 `DNSPerf` is the name of the dnsperf specific config:
-    `numDomains` - defines the number of domains that should be added to the DNS policy
-    `RunStress` - controls whether the test should run some control plane stress while the curl is executed - this is useful when testing DNS Policy, because it makes calico-node do work, which may delay DNS policy processing
-    `TestDNSPolicy` - controls whether or not the test should apply a DNS policy
-    `numTargetPods` - controls the number of target pods that should be created.  Curls will be round-robined to the targets. Must be at least 1.
-    `targetDomain` - specifies the domain name to target with curl requests (e.g., `www.example.com`)
+`numDomains` - defines the number of domains that should be added to the DNS policy
+`RunStress` - controls whether the test should run some control plane stress while the curl is executed - this is useful when testing DNS Policy, because it makes calico-node do work, which may delay DNS policy processing
+`TestDNSPolicy` - controls whether or not the test should apply a DNS policy
+`targetDomain` - specifies the domain name to target with curl requests (e.g., `www.example.com`). Tests use external domains and no longer create target pods.
 
 ## Prerequisites
+
 This test requires
-- a cluster running Calico Enterprise v3.20+ (inline policy mode is not available in v3.19).  Note that Inline mode in iptables was not introduced until v3.21
+
+- a cluster running Calico Enterprise v3.20+ (inline policy mode is not available in v3.19). Note that Inline mode in iptables was not introduced until v3.21
 - a domain outside the cluster that will reply with 200 OK to a high rate of curl requests.
 
 There are 4 DNS policy modes:
@@ -45,20 +48,25 @@ BPF supports Inline and NoDelay modes
 Nftables supports NoDelay, DelayDeniedPacket and DelayDNSResponse modes.
 
 ## Operation
-The test operates by execing into a test pod and running a curl command.  That curl command looks something like this:
+
+The test operates by execing into a test pod and running a curl command. That curl command looks something like this:
+
 ```
 curl -m 8 -w '{"time_lookup": %{time_namelookup}, "time_connect": %{time_connect}}\n' -s -o /dev/null http://testdomain
 ```
-The curl therefore outputs a lookup time and a connect time, which are recorded by the test.  The lookup time is the time between curl sending a DNS request for the target FQDN and getting a response from CoreDNS.  The connect time is the time taken from DNS response to completion of the TCP 3-way handshake.  The maximum time curl will wait for a response is 8 seconds.
+
+The curl therefore outputs a lookup time and a connect time, which are recorded by the test. The lookup time is the time between curl sending a DNS request for the target FQDN and getting a response from CoreDNS. The connect time is the time taken from DNS response to completion of the TCP 3-way handshake. The maximum time curl will wait for a response is 8 seconds.
 
 The test cycles round, creating test pods, running the curl command in them, and tearing them down in a multi-threaded manner.
 
-While this is going on, the test is also running tcpdump on the hosts, and watching how the TCP connections progress.  After the test completes, the tcpdump is analysed to look for duplicate SYN and SYNACK packets, which can be indicative of a slow TCP connection setup (e.g. if using NoDelay or DelayDeniedPacket modes).
+While this is going on, the test is also running tcpdump on the hosts, and watching how the TCP connections progress. After the test completes, the tcpdump is analysed to look for duplicate SYN and SYNACK packets, which can be indicative of a slow TCP connection setup (e.g. if using NoDelay or DelayDeniedPacket modes).
 
 Finally, the test does some basic statistical analysis on the results, and generates a result json.
 
 ## Result
+
 Example result:
+
 ```
 [
   {
@@ -133,8 +141,9 @@ Example result:
   }
 ]
 ```
+
 the dnsperf section contains statistical summaries of the curl results for LookupTime and ConnectTime.
 
-`DuplicateSYN` gives the number of duplicate SYN packets seen in the tcpdump (useful for DNS Policy performance).  tcpdump is only run when TestDNSPolicy=true.
+`DuplicateSYN` gives the number of duplicate SYN packets seen in the tcpdump (useful for DNS Policy performance). tcpdump is only run when TestDNSPolicy=true.
 `DuplicateSYNACK` gives the number of duplicate SYNACK packets seen in the tcpdump (useful for DNS Policy performance). tcpdump is only run when TestDNSPolicy=true.
 `FailedCurls` and `SuccessfulCurls` show the total number of failed and successful curl attempts during that test.
