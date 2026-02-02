@@ -264,12 +264,17 @@ func defaultAndValidate(cfg *Config) error {
 					return fmt.Errorf("NumDomains must be non-negative for a dnsperf test with TestDNSPolicy enabled")
 				}
 			}
-			if tcfg.Dataplane == DataPlaneBPF {
+
+			if tcfg.Dataplane == DataPlaneBPF { // BPF supports Inline and NoDelay modes only
 				if tcfg.DNSPerf.Mode == DNSPerfModeDelayDeniedPacket {
 					return fmt.Errorf("DelayDeniedPacket mode is not supported on BPF dataplane")
 				}
 				if tcfg.DNSPerf.Mode == DNSPerfModeDelayDNSResponse {
 					return fmt.Errorf("DelayDNSResponse mode is not supported on BPF dataplane")
+				}
+			} else if tcfg.Dataplane == DataPlaneNftables { // Nftables supports NoDelay, DelayDeniedPacket and DelayDNSResponse modes only
+				if tcfg.DNSPerf.Mode == DNSPerfModeInline {
+					return fmt.Errorf("Inline mode is not supported on Nftables dataplane")
 				}
 			}
 		}

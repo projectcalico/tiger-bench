@@ -107,6 +107,7 @@ func patchFelixConfig(ctx context.Context, clients config.Clients, testConfig co
 	log.Infof("Patching felixconfig to use %s dnspolicymode", dnsPolicyMode)
 	v3PolicyMode := v3.DNSPolicyModeNoDelay
 	v3BPFDNSPolicyMode := v3.BPFDNSPolicyModeNoDelay
+	v3NFTPolicyMode := v3.NFTablesDNSPolicyModeNoDelay
 	// get current dataplane from Installation
 	var installation operatorv1.Installation
 	err = clients.CtrlClient.Get(ctx, ctrlclient.ObjectKey{Name: "default"}, &installation)
@@ -118,7 +119,7 @@ func patchFelixConfig(ctx context.Context, clients config.Clients, testConfig co
 	log.Infof("Current dataplane is %s", *dataplane)
 
 	switch *dataplane {
-	case operatorv1.LinuxDataplaneIptables, operatorv1.LinuxDataplaneNftables:
+	case operatorv1.LinuxDataplaneIptables:
 		switch dnsPolicyMode {
 		case "DelayDNSResponse":
 			v3PolicyMode = v3.DNSPolicyModeDelayDNSResponse
@@ -129,7 +130,7 @@ func patchFelixConfig(ctx context.Context, clients config.Clients, testConfig co
 		case "NoDelay":
 			v3PolicyMode = v3.DNSPolicyModeNoDelay
 		default:
-			return fmt.Errorf("invalid DNS policy mode %s for iptables/nftables dataplane", dnsPolicyMode)
+			return fmt.Errorf("invalid DNS policy mode %s for iptables dataplane", dnsPolicyMode)
 		}
 		felixconfig.Spec.DNSPolicyMode = &v3PolicyMode
 	case operatorv1.LinuxDataplaneBPF:
@@ -142,6 +143,18 @@ func patchFelixConfig(ctx context.Context, clients config.Clients, testConfig co
 			return fmt.Errorf("invalid DNS policy mode %s for BPF dataplane", dnsPolicyMode)
 		}
 		felixconfig.Spec.BPFDNSPolicyMode = &v3BPFDNSPolicyMode
+	case operatorv1.LinuxDataplaneNftables:
+		switch dnsPolicyMode {
+		case "DelayDNSResponse":
+			v3NFTPolicyMode = v3.NFTablesDNSPolicyModeDelayDNSResponse
+		case "DelayDeniedPacket":
+			v3NFTPolicyMode = v3.NFTablesDNSPolicyModeDelayDeniedPacket
+		case "NoDelay":
+			v3NFTPolicyMode = v3.NFTablesDNSPolicyModeNoDelay
+		default:
+			return fmt.Errorf("invalid DNS policy mode %s for nftables dataplane", dnsPolicyMode)
+		}
+		felixconfig.Spec.NFTablesDNSPolicyMode = &v3NFTPolicyMode
 	default:
 		return fmt.Errorf("unknown dataplane %s", *dataplane)
 	}
@@ -165,14 +178,21 @@ func patchFelixConfig(ctx context.Context, clients config.Clients, testConfig co
 	if felixconfig.Spec.BPFDNSPolicyMode != nil {
 		log.Infof("felixconfig BPFDNSPolicyMode is now %s", *felixconfig.Spec.BPFDNSPolicyMode)
 	}
+	if felixconfig.Spec.NFTablesDNSPolicyMode != nil {
+		log.Infof("felixconfig NFTablesDNSPolicyMode is now %s", *felixconfig.Spec.NFTablesDNSPolicyMode)
+	}
 	switch *dataplane {
-	case operatorv1.LinuxDataplaneIptables, operatorv1.LinuxDataplaneNftables:
+	case operatorv1.LinuxDataplaneIptables:
 		if felixconfig.Spec.DNSPolicyMode == nil || *felixconfig.Spec.DNSPolicyMode != v3PolicyMode {
 			return fmt.Errorf("failed to set DNSPolicyMode to %s", v3PolicyMode)
 		}
 	case operatorv1.LinuxDataplaneBPF:
 		if felixconfig.Spec.BPFDNSPolicyMode == nil || *felixconfig.Spec.BPFDNSPolicyMode != v3BPFDNSPolicyMode {
 			return fmt.Errorf("failed to set BPFDNSPolicyMode to %s", v3BPFDNSPolicyMode)
+		}
+	case operatorv1.LinuxDataplaneNftables:
+		if felixconfig.Spec.NFTablesDNSPolicyMode == nil || *felixconfig.Spec.NFTablesDNSPolicyMode != v3NFTPolicyMode {
+			return fmt.Errorf("failed to set NFTablesDNSPolicyMode to %s", v3NFTPolicyMode)
 		}
 	default:
 		return fmt.Errorf("unknown dataplane %s", *dataplane)

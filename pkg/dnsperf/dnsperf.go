@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -217,6 +218,7 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 	if testConfig.DNSPerf.TestDNSPolicy {
 		// add up the duplicate SYN numbers from each tcpdump pod
 		results.DuplicateSYN = 0
+		results.DuplicateSYNACK = 0
 		for _, pod := range tcpdumppods {
 			duplicateSYN, duplicateSYNACK, err := countDuplicateSYN(ctx, &pod)
 			if err != nil {
@@ -370,10 +372,15 @@ func countDuplicateSYN(ctx context.Context, pod *corev1.Pod) (int, int, error) {
 	for i := 0; i < 10; i++ {
 		cmd := `tcpdump -n -r dump.cap`
 		stdout, stderr, err := utils.ExecCommandInPod(ctx, pod, cmd, 10)
+
+		// Check if we got reasonable tcpdump output (contains packet data)
+		hasPacketData := strings.Contains(stdout, " IP ") && strings.Contains(stdout, "Flags [")
+
 		if err == nil {
 			return processTCPDumpOutput(stdout)
-		} else if strings.Contains(stdout, "truncated dump file") {
-			log.Info("tcpdump file was truncated, ignoring")
+		} else if hasPacketData {
+			// We got packet data even though there was an error (likely truncated/corrupted file at the end)
+			log.WithError(err).Info("tcpdump reported errors but output contains valid packet data, processing anyway")
 			return processTCPDumpOutput(stdout)
 		} else {
 			log.WithError(err).Infof("Hit error running command %s, retrying.  stderr: %s stdout: %s", cmd, stderr, stdout)
@@ -385,56 +392,98 @@ func countDuplicateSYN(ctx context.Context, pod *corev1.Pod) (int, int, error) {
 
 func processTCPDumpOutput(out string) (int, int, error) {
 	log.Debug("entering processTCPDumpOutput function")
+	// write out to a file for debugging
+	err := os.WriteFile("tcpdump_output.txt", []byte(out), 0644)
+	if err != nil {
+		log.WithError(err).Error("failed to write tcpdump output to file")
+	}
+
 	duplicateSYN := 0
 	duplicateSYNACK := 0
 	scanner := bufio.NewScanner(strings.NewReader(out))
-	lastSYNSeq := 0
-	lastSYNACKSeq := 0
+
+	// Track sequence numbers per TCP flow (connection tuple)
+	synSeqMap := make(map[string]int)    // Map of "srcIP:srcPort->dstIP:dstPort" to last SYN seq
+	synackSeqMap := make(map[string]int) // Map of "srcIP:srcPort->dstIP:dstPort" to last SYN-ACK seq
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		log.Infof("line=%s", line)
-		if strings.Contains(line, "IP") && strings.Contains(line, "Flags [S") && !strings.Contains(line, "HTTP") {
-			// store off the seq number
-			tokens := strings.Split(line, " ")
-			for i, token := range tokens {
-				if token == "seq" {
-					// clean off any non-numeric characters, e.g. commas
-					seqstr := tokens[i+1]
-					var builder strings.Builder
-					for _, r := range seqstr {
-						if unicode.IsDigit(r) {
-							builder.WriteRune(r)
-						}
-					}
-					seqstr = builder.String()
-					seq, err := strconv.Atoi(seqstr)
-					if err != nil {
-						return 0, 0, fmt.Errorf("failed to parse seq number")
-					}
-					if strings.Contains(line, "Flags [S]") {
-						log.Debugf("lastSYNSeq=%d  Found seq=%d", lastSYNSeq, seq)
-						// We have a duplicate SYN if the seq number for this SYN packet is the same as the last one
-						if lastSYNSeq == seq {
-							duplicateSYN++
-						}
-						lastSYNSeq = seq
-						break
-					} else if strings.Contains(line, "Flags [S.]") {
-						log.Debugf("lastSYNACKSeq=%d  Found seq=%d", lastSYNACKSeq, seq)
-						// We have a duplicate SYNACK if the seq number for this SYNACK packet is the same as the last one
-						if lastSYNACKSeq == seq {
-							duplicateSYNACK++
-						}
-						lastSYNACKSeq = seq
-						break
-					}
+		log.Debugf("line=%s", line)
+
+		if !strings.Contains(line, "IP") || !strings.Contains(line, "Flags [S") || strings.Contains(line, "HTTP") {
+			continue
+		}
+
+		// Parse connection tuple and sequence number
+		// Expected format: "timestamp IP srcIP.srcPort > dstIP.dstPort: Flags [S], seq NNNN"
+		tokens := strings.Split(line, " ")
+
+		var srcAddr, dstAddr string
+		var seqNum int
+		foundSeq := false
+
+		// Find source and destination addresses
+		for i, token := range tokens {
+			if token == "IP" && i+3 < len(tokens) {
+				srcAddr = tokens[i+1]
+				if tokens[i+2] == ">" {
+					// Remove trailing colon from destination
+					dstAddr = strings.TrimSuffix(tokens[i+3], ":")
 				}
 			}
+			if token == "seq" && i+1 < len(tokens) {
+				// Extract sequence number, removing non-numeric characters
+				seqstr := tokens[i+1]
+				var builder strings.Builder
+				for _, r := range seqstr {
+					if unicode.IsDigit(r) {
+						builder.WriteRune(r)
+					}
+				}
+				seqstr = builder.String()
+				seqNum, err = strconv.Atoi(seqstr)
+				if err != nil {
+					log.WithError(err).Warnf("failed to parse seq number from: %s", tokens[i+1])
+					continue
+				}
+				foundSeq = true
+				break
+			}
+		}
+
+		if !foundSeq || srcAddr == "" || dstAddr == "" {
+			continue
+		}
+
+		// Create connection tuple as key
+		connectionKey := fmt.Sprintf("%s->%s", srcAddr, dstAddr)
+
+		if strings.Contains(line, "Flags [S.]") {
+			// SYN-ACK packet
+			log.Debugf("SYN-ACK on connection %s: seq=%d", connectionKey, seqNum)
+			if lastSeq, exists := synackSeqMap[connectionKey]; exists && lastSeq == seqNum {
+				duplicateSYNACK++
+				log.Debugf("Duplicate SYN-ACK detected on %s: seq=%d", connectionKey, seqNum)
+			}
+			synackSeqMap[connectionKey] = seqNum
+		} else if strings.Contains(line, "Flags [S]") {
+			// SYN packet (but not SYN-ACK)
+			log.Debugf("SYN on connection %s: seq=%d", connectionKey, seqNum)
+			if lastSeq, exists := synSeqMap[connectionKey]; exists && lastSeq == seqNum {
+				duplicateSYN++
+				log.Debugf("Duplicate SYN detected on %s: seq=%d", connectionKey, seqNum)
+			}
+			synSeqMap[connectionKey] = seqNum
 		}
 	}
-	log.Infof("found %d duplicate SYNs", duplicateSYN)
-	log.Infof("found %d duplicate SYNACKs", duplicateSYNACK)
+
+	if err := scanner.Err(); err != nil {
+		log.WithError(err).Error("error reading tcpdump output")
+		return duplicateSYN, duplicateSYNACK, err
+	}
+
+	log.Infof("found %d duplicate SYNs across %d connections", duplicateSYN, len(synSeqMap))
+	log.Infof("found %d duplicate SYNACKs across %d connections", duplicateSYNACK, len(synackSeqMap))
 	return duplicateSYN, duplicateSYNACK, nil
 }
 

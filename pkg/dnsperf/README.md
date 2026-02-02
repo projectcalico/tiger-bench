@@ -13,9 +13,10 @@ Example Config:
   iterations: 1
   duration: 60
   DNSPerf:
-    numDomains: 0
-    RunStress: false
-    TestDNSPolicy: false
+    numDomains: 2
+    runStress: false
+    mode: Inline
+    testDNSPolicy: true
     numTargetPods: 10
     targetDomain: www.example.com
 ```
@@ -26,21 +27,35 @@ Setting `Dataplane` causes the tool to reconfigure your cluster to use a particu
 `duration` defines the length of time the test will be repeated for
 `DNSPerf` is the name of the dnsperf specific config:
     `numDomains` - defines the number of domains that should be added to the DNS policy
-    `RunStress` - controls whether the test should run some control plane stress while the curl is executed - this is useful when testing DNS Policy, because it makes calico-node do work.
-    `TestDNSPolicy` - controls whether or not the test should be a DNS policy test
+    `RunStress` - controls whether the test should run some control plane stress while the curl is executed - this is useful when testing DNS Policy, because it makes calico-node do work, which may delay DNS policy processing
+    `TestDNSPolicy` - controls whether or not the test should apply a DNS policy
     `numTargetPods` - controls the number of target pods that should be created.  Curls will be round-robined to the targets. Must be at least 1.
     `targetDomain` - specifies the domain name to target with curl requests (e.g., `www.example.com`)
 
+## Prerequisites
+This test requires
+- a cluster running Calico Enterprise v3.20+ (inline policy mode is not available in v3.19).  Note that Inline mode in iptables was not introduced until v3.21
+- a domain outside the cluster that will reply with 200 OK to a high rate of curl requests.
+
+There are 4 DNS policy modes:
+"DelayDNSResponse", "DelayDeniedPacket", "Inline", "NoDelay". Support for each with different versions and dataplanes varies, please check the Calico Enteprise docs.
+See https://docs.tigera.io/calico-enterprise/latest/reference/resources/felixconfig#dnspolicymode for details of how they differ.
+Iptables supports all 4 modes.
+BPF supports Inline and NoDelay modes
+Nftables supports NoDelay, DelayDeniedPacket and DelayDNSResponse modes.
 
 ## Operation
 The test operates by execing into a test pod and running a curl command.  That curl command looks something like this:
 ```
-curl -m 8 -w '{"time_lookup": %{time_namelookup}, "time_connect": %{time_connect}}\n' -s -o /dev/null http://service.cluster.local:8080
+curl -m 8 -w '{"time_lookup": %{time_namelookup}, "time_connect": %{time_connect}}\n' -s -o /dev/null http://testdomain
 ```
-The curl therefore outputs a lookup time and a connect time, which are recorded by the test.  The lookup time is the time between curl sending a DNS request for the target FQDN and getting a response from CoreDNS.  The connect time is the time taken from DNS response to completion of the TCP 3-way handshake.
+The curl therefore outputs a lookup time and a connect time, which are recorded by the test.  The lookup time is the time between curl sending a DNS request for the target FQDN and getting a response from CoreDNS.  The connect time is the time taken from DNS response to completion of the TCP 3-way handshake.  The maximum time curl will wait for a response is 8 seconds.
 
-The test cycles round, creating test pods, running the curl command in them, and tearing them down.
+The test cycles round, creating test pods, running the curl command in them, and tearing them down in a multi-threaded manner.
 
+While this is going on, the test is also running tcpdump on the hosts, and watching how the TCP connections progress.  After the test completes, the tcpdump is analysed to look for duplicate SYN and SYNACK packets, which can be indicative of a slow TCP connection setup (e.g. if using NoDelay or DelayDeniedPacket modes).
+
+Finally, the test does some basic statistical analysis on the results, and generates a result json.
 
 ## Result
 Example result:

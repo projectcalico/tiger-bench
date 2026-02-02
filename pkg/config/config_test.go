@@ -390,3 +390,184 @@ func TestDNSBasic(t *testing.T) {
 	assert.Equal(t, DNSPerfModeInline, cfg.TestConfigs[0].DNSPerf.Mode)
 	assert.Equal(t, 10, cfg.TestConfigs[0].DNSPerf.NumDomains)
 }
+
+// Tests for valid and invalid dnsperf modes with different dataplanes
+
+func TestDNSPerfValidModesWithIPTables(t *testing.T) {
+	// IPTables supports all modes: Inline, NoDelay, DelayDeniedPacket, DelayDNSResponse
+	validModes := []DNSPerfMode{
+		DNSPerfModeInline,
+		DNSPerfModeNoDelay,
+		DNSPerfModeDelayDeniedPacket,
+		DNSPerfModeDelayDNSResponse,
+	}
+
+	for _, mode := range validModes {
+		fileContent := `
+- testKind: dnsperf
+  dataplane: iptables
+  dnsperf:
+    Mode: ` + string(mode) + `
+    NumDomains: 10
+    NumTargetPods: 5
+`
+		filePath := "/tmp/test_configs.yaml"
+		err := os.WriteFile(filePath, []byte(fileContent), 0644)
+		require.NoError(t, err)
+		defer os.Remove(filePath)
+
+		var cfg Config
+		cfg.TestConfigFile = filePath
+		err = loadTestConfigsFromFile(&cfg)
+		if err != nil {
+			t.Errorf("IPTables should support mode %q, but got error: %v", mode, err)
+		}
+	}
+}
+
+func TestDNSPerfValidModesWithBPF(t *testing.T) {
+	// BPF supports only Inline and NoDelay modes
+	validModes := []DNSPerfMode{
+		DNSPerfModeInline,
+		DNSPerfModeNoDelay,
+	}
+
+	for _, mode := range validModes {
+		fileContent := `
+- testKind: dnsperf
+  dataplane: bpf
+  dnsperf:
+    Mode: ` + string(mode) + `
+    NumDomains: 10
+    NumTargetPods: 5
+`
+		filePath := "/tmp/test_configs.yaml"
+		err := os.WriteFile(filePath, []byte(fileContent), 0644)
+		require.NoError(t, err)
+		defer os.Remove(filePath)
+
+		var cfg Config
+		cfg.TestConfigFile = filePath
+		err = loadTestConfigsFromFile(&cfg)
+		if err != nil {
+			t.Errorf("BPF should support mode %q, but got error: %v", mode, err)
+		}
+	}
+}
+
+func TestDNSPerfInvalidModesWithBPF(t *testing.T) {
+	// BPF does NOT support DelayDeniedPacket and DelayDNSResponse modes
+	invalidModes := []DNSPerfMode{
+		DNSPerfModeDelayDeniedPacket,
+		DNSPerfModeDelayDNSResponse,
+	}
+
+	for _, mode := range invalidModes {
+		fileContent := `
+- testKind: dnsperf
+  dataplane: bpf
+  dnsperf:
+    Mode: ` + string(mode) + `
+    NumDomains: 10
+    NumTargetPods: 5
+`
+		filePath := "/tmp/test_configs.yaml"
+		err := os.WriteFile(filePath, []byte(fileContent), 0644)
+		require.NoError(t, err)
+		defer os.Remove(filePath)
+
+		var cfg Config
+		cfg.TestConfigFile = filePath
+		err = loadTestConfigsFromFile(&cfg)
+		if err == nil {
+			t.Errorf("BPF should NOT support mode %q, but validation passed", mode)
+		}
+		assert.Contains(t, err.Error(), "not supported on BPF dataplane")
+	}
+}
+
+func TestDNSPerfValidModesWithNftables(t *testing.T) {
+	// Nftables supports NoDelay, DelayDeniedPacket, and DelayDNSResponse modes
+	validModes := []DNSPerfMode{
+		DNSPerfModeNoDelay,
+		DNSPerfModeDelayDeniedPacket,
+		DNSPerfModeDelayDNSResponse,
+	}
+
+	for _, mode := range validModes {
+		fileContent := `
+- testKind: dnsperf
+  dataplane: nftables
+  dnsperf:
+    Mode: ` + string(mode) + `
+    NumDomains: 10
+    NumTargetPods: 5
+`
+		filePath := "/tmp/test_configs.yaml"
+		err := os.WriteFile(filePath, []byte(fileContent), 0644)
+		require.NoError(t, err)
+		defer os.Remove(filePath)
+
+		var cfg Config
+		cfg.TestConfigFile = filePath
+		err = loadTestConfigsFromFile(&cfg)
+		if err != nil {
+			t.Errorf("Nftables should support mode %q, but got error: %v", mode, err)
+		}
+	}
+}
+
+func TestDNSPerfInvalidModesWithNftables(t *testing.T) {
+	// Nftables does NOT support Inline mode
+	fileContent := `
+- testKind: dnsperf
+  dataplane: nftables
+  dnsperf:
+    Mode: Inline
+    NumDomains: 10
+    NumTargetPods: 5
+`
+	filePath := "/tmp/test_configs.yaml"
+	err := os.WriteFile(filePath, []byte(fileContent), 0644)
+	require.NoError(t, err)
+	defer os.Remove(filePath)
+
+	var cfg Config
+	cfg.TestConfigFile = filePath
+	err = loadTestConfigsFromFile(&cfg)
+	if err == nil {
+		t.Errorf("Nftables should NOT support Inline mode, but validation passed")
+	}
+	assert.Contains(t, err.Error(), "Inline mode is not supported on Nftables dataplane")
+}
+
+func TestDNSPerfValidModesWithUnsetDataplane(t *testing.T) {
+	// When dataplane is unset, all modes should be allowed
+	validModes := []DNSPerfMode{
+		DNSPerfModeInline,
+		DNSPerfModeNoDelay,
+		DNSPerfModeDelayDeniedPacket,
+		DNSPerfModeDelayDNSResponse,
+	}
+
+	for _, mode := range validModes {
+		fileContent := `
+- testKind: dnsperf
+  dnsperf:
+    Mode: ` + string(mode) + `
+    NumDomains: 10
+    NumTargetPods: 5
+`
+		filePath := "/tmp/test_configs.yaml"
+		err := os.WriteFile(filePath, []byte(fileContent), 0644)
+		require.NoError(t, err)
+		defer os.Remove(filePath)
+
+		var cfg Config
+		cfg.TestConfigFile = filePath
+		err = loadTestConfigsFromFile(&cfg)
+		if err != nil {
+			t.Errorf("Unset dataplane should support mode %q, but got error: %v", mode, err)
+		}
+	}
+}
