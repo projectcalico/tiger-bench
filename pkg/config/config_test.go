@@ -436,9 +436,7 @@ func TestDNSPerfValidModesWithBPF(t *testing.T) {
   dataplane: bpf
   dnsperf:
     Mode: ` + string(mode) + `
-    NumDomains: 10
-    NumTargetPods: 5
-`
+    NumDomains: 10`
 		filePath := "/tmp/test_configs.yaml"
 		err := os.WriteFile(filePath, []byte(fileContent), 0644)
 		require.NoError(t, err)
@@ -467,7 +465,6 @@ func TestDNSPerfInvalidModesWithBPF(t *testing.T) {
   dnsperf:
     Mode: ` + string(mode) + `
     NumDomains: 10
-    NumTargetPods: 5
 `
 		filePath := "/tmp/test_configs.yaml"
 		err := os.WriteFile(filePath, []byte(fileContent), 0644)

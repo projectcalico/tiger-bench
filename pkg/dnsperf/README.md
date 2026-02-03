@@ -47,7 +47,7 @@ This test requires
 - one node labelled with tigera.io/test-nodepool=default-pool - this is the node where the test will run its pods
 
 There are 4 DNS policy modes:
-"DelayDNSResponse", "DelayDeniedPacket", "Inline", "NoDelay". Support for each with different versions and dataplanes varies, please check the Calico Enteprise docs.
+"DelayDNSResponse", "DelayDeniedPacket", "Inline", "NoDelay". Support for each with different versions and dataplanes varies, please check the Calico Enterprise docs.
 See https://docs.tigera.io/calico-enterprise/latest/reference/resources/felixconfig#dnspolicymode for details of how they differ.
 Iptables supports all 4 modes.
 BPF supports Inline and NoDelay modes
@@ -92,7 +92,6 @@ Example result:
         "Mode": "",
         "RunStress": false,
         "TestDNSPolicy": false,
-        "NumTargetPods": 10,
         "TargetURL": "http://www.example.com"
       },
       "Perf": null,

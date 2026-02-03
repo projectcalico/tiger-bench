@@ -190,13 +190,25 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 	log.Debugf("Created test context: %+v", testctx)
 
 	if testConfig.DNSPerf.TestDNSPolicy {
+		// Create a map of tcpdump pods by node name for reliable pairing
+		tcpdumpByNode := make(map[string]corev1.Pod)
+		for _, pod := range tcpdumppods {
+			tcpdumpByNode[pod.Spec.NodeName] = pod
+		}
+
 		// kick off per-node threads to run tcpdump
-		for i, pod := range tcpdumppods {
-			go func(idx int, tcpdumpPod corev1.Pod) {
-				if e := runTCPDump(testctx, clients, &tcpdumpPod, testpods[idx], testConfig.Duration+60); e != nil {
+		for _, testPod := range testpods {
+			// Look up the corresponding tcpdump pod by node name
+			tcpdumpPod, ok := tcpdumpByNode[testPod.Spec.NodeName]
+			if !ok {
+				log.Warnf("No tcpdump pod found for node %s, skipping tcpdump for this node", testPod.Spec.NodeName)
+				continue
+			}
+			go func(tcpdumpPod corev1.Pod, testPod corev1.Pod) {
+				if e := runTCPDump(testctx, clients, &tcpdumpPod, testPod, testConfig.Duration+60); e != nil {
 					log.WithError(e).Error("failed to run tcpdump")
 				}
-			}(i, pod)
+			}(tcpdumpPod, testPod)
 		}
 		log.Info("tcpdump threads started")
 	}
