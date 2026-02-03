@@ -30,14 +30,22 @@ COPY --from=builder /benchmark/benchmark /benchmark
 
 RUN set -e; \
     case "${TARGETARCH}" in \
-    amd64) ARCH=amd64 ;; \
-    arm64) ARCH=arm64 ;; \
-    *) echo "Unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
+    amd64) \
+    ARCH=amd64; \
+    EXPECTED_SHA256="d2c7a53c7cc6ff2e0e1e9ed86c85e6e4fd50da86adb26767b1e8f0518afa6e4b" ;; \
+    arm64) \
+    ARCH=arm64; \
+    EXPECTED_SHA256="ad94ae69b8d70c1d2de5a1eab8e9ce01f50f7be64c35f89ff1ea9cf57c45ce8c" ;; \
+    *) echo "Unsupported architecture: ${TARGETARCH}" ; exit 1 ;; \
     esac && \
+    echo "Downloading aws-iam-authenticator for ${ARCH}..." && \
     curl -L --retry 5 --retry-delay 10 \
     https://github.com/kubernetes-sigs/aws-iam-authenticator/releases/download/v0.6.30/aws-iam-authenticator_0.6.30_linux_${ARCH} \
     -o /usr/local/bin/aws-iam-authenticator && \
-    chmod +x /usr/local/bin/aws-iam-authenticator
+    echo "Verifying checksum..." && \
+    echo "${EXPECTED_SHA256}  /usr/local/bin/aws-iam-authenticator" | sha256sum -c - && \
+    chmod +x /usr/local/bin/aws-iam-authenticator && \
+    echo "aws-iam-authenticator installed successfully"
 
 ENV KUBECONFIG="/kubeconfig"
 ENV TESTCONFIGFILE="/testconfig.yaml"
