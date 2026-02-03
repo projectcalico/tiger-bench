@@ -19,7 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
+	"net"
 	"strconv"
 	"strings"
 	"sync"
@@ -59,9 +59,25 @@ type Results struct {
 }
 
 // MakeDNSPolicy Makes a large DNS policy with a fixed bunch of domains and some generated ones
-func MakeDNSPolicy(namespace string, name string, numDomains int, targetDomain string) v3.NetworkPolicy {
+func MakeDNSPolicy(namespace string, name string, numDomains int, targetURL string) (v3.NetworkPolicy, error) {
 	udp := numorstring.ProtocolFromString("UDP")
 	orderOne := float64(1)
+
+	// Check that targetURL is not empty
+	if targetURL == "" {
+		return v3.NetworkPolicy{}, fmt.Errorf("targetURL cannot be empty")
+	}
+
+	// Extract just the domain for the DNS policy
+	targetDomain, err := utils.ExtractDomainFromURL(targetURL)
+	if err != nil {
+		return v3.NetworkPolicy{}, fmt.Errorf("failed to extract domain from URL: %w", err)
+	}
+
+	// Check that the targetDomain is not an IP address
+	if net.ParseIP(targetDomain) != nil {
+		return v3.NetworkPolicy{}, fmt.Errorf("Target domain %s appears to be an IP address, which is not supported for DNS policies", targetDomain)
+	}
 
 	var testdomains = []string{
 		targetDomain,
@@ -110,7 +126,7 @@ func MakeDNSPolicy(namespace string, name string, numDomains int, targetDomain s
 				},
 			},
 		},
-	}
+	}, nil
 }
 
 // RunDNSPerfTests runs a DNS performance test
@@ -152,14 +168,17 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 		}
 	}
 
-	var testdomains []string
-	if testConfig.DNSPerf.TargetDomain != "" {
-		log.Infof("Using external target URL: %s", testConfig.DNSPerf.TargetDomain)
-		testdomains = []string{testConfig.DNSPerf.TargetDomain}
+	var targetURL string
+	if testConfig.DNSPerf.TargetURL != "" {
+		log.Infof("Using external target URL: %s", testConfig.DNSPerf.TargetURL)
+		targetURL = testConfig.DNSPerf.TargetURL
 	} else {
-		log.Error("TargetDomain is required but not specified")
-		return &results, fmt.Errorf("TargetDomain is required for DNS performance tests")
+		log.Error("TargetURL is required but not specified")
+		return &results, fmt.Errorf("TargetURL is required for DNS performance tests")
 	}
+
+	// For curl commands, use the full URL
+	testdomains := []string{targetURL}
 
 	err = checkTestPods(ctx, clients, testpods)
 	if err != nil {
@@ -409,11 +428,6 @@ func countDuplicateSYN(ctx context.Context, pod *corev1.Pod) (int, int, error) {
 
 func processTCPDumpOutput(out string) (int, int, error) {
 	log.Debug("entering processTCPDumpOutput function")
-	// write out to a file for debugging
-	err := os.WriteFile("tcpdump_output.txt", []byte(out), 0644)
-	if err != nil {
-		log.WithError(err).Error("failed to write tcpdump output to file")
-	}
 
 	duplicateSYN := 0
 	duplicateSYNACK := 0
@@ -458,7 +472,7 @@ func processTCPDumpOutput(out string) (int, int, error) {
 					}
 				}
 				seqstr = builder.String()
-				seqNum, err = strconv.Atoi(seqstr)
+				_, err := strconv.Atoi(seqstr)
 				if err != nil {
 					log.WithError(err).Warnf("failed to parse seq number from: %s", tokens[i+1])
 					continue

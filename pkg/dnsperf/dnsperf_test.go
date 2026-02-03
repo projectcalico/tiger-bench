@@ -16,7 +16,6 @@ package dnsperf
 
 import (
 	"fmt"
-	"os"
 	"reflect"
 	testing "testing"
 
@@ -242,16 +241,6 @@ reading from file dump.cap, link-type EN10MB (Ethernet), snapshot length 262144
 
 }
 
-func TestProcessTCPDumpOutputFromFile(t *testing.T) {
-	content, err := os.ReadFile("tcpdump_test_output.txt")
-	require.NoError(t, err)
-
-	duplicateSYN, duplicateSYNACK, err := processTCPDumpOutput(string(content))
-	require.NoError(t, err)
-	require.Equal(t, 1, duplicateSYN)     // In the test file, this is at line 4
-	require.Equal(t, 1, duplicateSYNACK)  // In the test file, this is at line 80
-}
-
 func TestProcessResults(t *testing.T) {
 	// Test case 1: Empty input
 	var rawResults []CurlResult
@@ -378,6 +367,7 @@ func TestProcessResults(t *testing.T) {
 func TestMakeDNSPolicy(t *testing.T) {
 	namespace := "test-namespace"
 	name := "test-policy"
+	targetURL := "http://www.example.com"
 	targetDomain := "www.example.com"
 	var testdomains = []string{
 		targetDomain,
@@ -418,22 +408,56 @@ func TestMakeDNSPolicy(t *testing.T) {
 
 	// Test case 1: One domain
 	numDomains := 1
-	result := MakeDNSPolicy(namespace, name, numDomains, targetDomain)
+	result, err := MakeDNSPolicy(namespace, name, numDomains, targetURL)
+	if err != nil {
+		t.Errorf("MakeDNSPolicy() returned an error: %v", err)
+	}
 	if !reflect.DeepEqual(result, expected) {
 		t.Errorf("MakeDNSPolicy() failed, expected: %v, got: %v", expected, result)
 	}
 
 	// Test case 2: Zero domains
 	numDomains = 0
-	result = MakeDNSPolicy(namespace, name, numDomains, targetDomain)
+	result, err = MakeDNSPolicy(namespace, name, numDomains, targetURL)
+	if err != nil {
+		t.Errorf("MakeDNSPolicy() returned an error: %v", err)
+	}
 	if !reflect.DeepEqual(result, expected) {
 		t.Errorf("MakeDNSPolicy() failed, expected: %v, got: %v", expected, result)
 	}
 
 	// Test case 2: 50 domains
 	numDomains = 50
-	result = MakeDNSPolicy(namespace, name, numDomains, targetDomain)
+	result, err = MakeDNSPolicy(namespace, name, numDomains, targetURL)
+	if err != nil {
+		t.Errorf("MakeDNSPolicy() returned an error: %v", err)
+	}
 	if len(result.Spec.Egress[1].Destination.Domains) != 50 {
 		t.Errorf("MakeDNSPolicy() failed, expected: %v, got: %v", numDomains, len(result.Spec.Egress[1].Destination.Domains))
+	}
+
+	// Test case 3: IPv4 in targetURL - expect an error
+	numDomains = 1
+	result, err = MakeDNSPolicy(namespace, name, numDomains, "http://192.168.1.1")
+	if err == nil {
+		t.Errorf("MakeDNSPolicy() should return an error for IPv4 address")
+	}
+
+	// Test case 4: IPv6 in targetURL - expect an error
+	result, err = MakeDNSPolicy(namespace, name, numDomains, "http://[::1]")
+	if err == nil {
+		t.Errorf("MakeDNSPolicy() should return an error for IPv6 address")
+	}
+
+	// Test case 5: IPv6 full address in targetURL - expect an error
+	result, err = MakeDNSPolicy(namespace, name, numDomains, "http://[2001:db8::1]")
+	if err == nil {
+		t.Errorf("MakeDNSPolicy() should return an error for IPv6 address")
+	}
+
+	// Test case 6: Empty targetURL - expect an error
+	result, err = MakeDNSPolicy(namespace, name, numDomains, "")
+	if err == nil {
+		t.Errorf("MakeDNSPolicy() should return an error for empty targetURL")
 	}
 }

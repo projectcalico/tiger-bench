@@ -1,9 +1,6 @@
 # DNSPerf tests
 
-This test has 2 use cases:
-
-- to test DNS Policy performance in Calico Enterprise clusters
-- to test the latency of a service using Curl
+The point of this test is to test DNS Policy performance in Calico Enterprise clusters.
 
 Example Config:
 
@@ -14,12 +11,13 @@ Example Config:
   numServices: 1000
   iterations: 1
   duration: 60
+  calicoNodeCPULimit: 10m
   DNSPerf:
     numDomains: 2
     runStress: false
     mode: Inline
     testDNSPolicy: true
-    targetDomain: www.example.com
+    targetURL: http://www.example.com
 ```
 
 `testKind` sets the test to be a dnsperf test.
@@ -27,18 +25,26 @@ Setting `Dataplane` causes the tool to reconfigure your cluster to use a particu
 `numServices` causes the tool to set up "standing config", which includes services. This takes the form of 10 pods, each backing N services (where N is the number you set)
 `iterations` is not used by dnsperf tests.
 `duration` defines the length of time the test will be repeated for
+`calicoNodeCPULimit` sets a CPU limit on the calico-node pods. This can be helpful when testing DNS policy modes where calico-node needs to update the dataplane, but is overloaded.
 `DNSPerf` is the name of the dnsperf specific config:
 `numDomains` - defines the number of domains that should be added to the DNS policy
 `RunStress` - controls whether the test should run some control plane stress while the curl is executed - this is useful when testing DNS Policy, because it makes calico-node do work, which may delay DNS policy processing
 `TestDNSPolicy` - controls whether or not the test should apply a DNS policy
-`targetDomain` - specifies the domain name to target with curl requests (e.g., `www.example.com`). Tests use external domains and no longer create target pods.
+`targetURL` - specifies the URL to target with curl requests (e.g., `http://www.example.com` or `https://www.example.com`). Tests use external URLs and no longer create target pods. The domain will be extracted where needed for DNS policy rules.
 
 ## Prerequisites
 
 This test requires
 
-- a cluster running Calico Enterprise v3.20+ (inline policy mode is not available in v3.19). Note that Inline mode in iptables was not introduced until v3.21
-- a domain outside the cluster that will reply with 200 OK to a high rate of curl requests.
+- a cluster running Calico Enterprise
+    - v3.20+ for inline mode in BPF mode
+    - v3.21+ for inline mode in iptables mode
+- a webserver *outside the cluster* that will reply with 200 OK to a high rate of curl requests.  For meaningful test results, this target should:
+    - be near the cluster (in terms of latency)
+    - not throttle connections (do not use www.google.com!)
+    - have high bandwidth available (so our latency measurements are not affected by queuing)
+    - have a DNS name (this test cannot use an IP)
+- one node labelled with tigera.io/test-nodepool=default-pool - this is the node where the test will run its pods
 
 There are 4 DNS policy modes:
 "DelayDNSResponse", "DelayDeniedPacket", "Inline", "NoDelay". Support for each with different versions and dataplanes varies, please check the Calico Enteprise docs.
@@ -52,7 +58,7 @@ Nftables supports NoDelay, DelayDeniedPacket and DelayDNSResponse modes.
 The test operates by execing into a test pod and running a curl command. That curl command looks something like this:
 
 ```
-curl -m 8 -w '{"time_lookup": %{time_namelookup}, "time_connect": %{time_connect}}\n' -s -o /dev/null http://testdomain
+curl -m 8 -w '{"time_lookup": %{time_namelookup}, "time_connect": %{time_connect}}\n' -s -o /dev/null http://www.example.com
 ```
 
 The curl therefore outputs a lookup time and a connect time, which are recorded by the test. The lookup time is the time between curl sending a DNS request for the target FQDN and getting a response from CoreDNS. The connect time is the time taken from DNS response to completion of the TCP 3-way handshake. The maximum time curl will wait for a response is 8 seconds.
@@ -87,7 +93,7 @@ Example result:
         "RunStress": false,
         "TestDNSPolicy": false,
         "NumTargetPods": 10,
-        "TargetDomain": "www.example.com"
+        "TargetURL": "http://www.example.com"
       },
       "Perf": null,
       "TTFRConfig": null,
@@ -147,3 +153,15 @@ the dnsperf section contains statistical summaries of the curl results for Looku
 `DuplicateSYN` gives the number of duplicate SYN packets seen in the tcpdump (useful for DNS Policy performance). tcpdump is only run when TestDNSPolicy=true.
 `DuplicateSYNACK` gives the number of duplicate SYNACK packets seen in the tcpdump (useful for DNS Policy performance). tcpdump is only run when TestDNSPolicy=true.
 `FailedCurls` and `SuccessfulCurls` show the total number of failed and successful curl attempts during that test.
+
+## Understanding the results
+
+Each DNS policy mode is likely to show different behaviour.
+- NoDelay allows the DNS lookup to proceed as normal, but the pod will not be able to make a connection until the IP returned in the DNS lookup has been programmed into the dataplane by calico-node.  This can result in connection failures, which need to be retried by the app, which typically happens on a 5 second timer.
+- DelayDNSResponse mode delays the DNS response packet until the IP within it has been programmed into the dataplane by calico-node.  This can result in longer lookup times from the PoV of the pod, but the initial connection should succeed.
+- DelayDeniedPacket mode permits the DNS lookup to proceed as normal, but holds the outgoing packets until the dataplane is programmed by calico-node.  This can result in duplicated SYNs as the network stack retries the connection setup.
+
+As you can see, these 3 modes all require calico-node to update the dataplane.  If calico-node is starved of CPU (e.g. low limit) and/or very busy (e.g. lots of policy changes or pod creation/deletion), these delays can be noticable.
+
+The final mode:
+- Inline mode uses a BPF program (which run in a VM in kernel space) to update the dataplane as soon as it sees the DNS response, as part of forwarding the packet.  This happens independently of calico-node and is very fast.

@@ -567,8 +567,8 @@ func TestDNSPerfValidModesWithUnsetDataplane(t *testing.T) {
 	}
 }
 
-// TestTargetDomainDefault tests that TargetDomain defaults to www.example.com when not specified
-func TestTargetDomainDefault(t *testing.T) {
+// TestTargetURLDefault tests that TargetURL defaults to www.example.com when not specified
+func TestTargetURLDefault(t *testing.T) {
 	fileContent := `
 - testKind: dnsperf
   dnsperf:
@@ -584,17 +584,17 @@ func TestTargetDomainDefault(t *testing.T) {
 	cfg.TestConfigFile = filePath
 	err = loadTestConfigsFromFile(&cfg)
 	require.NoError(t, err)
-	assert.Equal(t, "www.example.com", cfg.TestConfigs[0].DNSPerf.TargetDomain)
+	assert.Equal(t, "http://www.example.com", cfg.TestConfigs[0].DNSPerf.TargetURL)
 }
 
-// TestTargetDomainCustomValue tests that TargetDomain can be overridden
-func TestTargetDomainCustomValue(t *testing.T) {
+// TestTargetURLCustomValue tests that TargetURL can be overridden
+func TestTargetURLCustomValue(t *testing.T) {
 	fileContent := `
 - testKind: dnsperf
   dnsperf:
     Mode: Inline
     NumDomains: 10
-    TargetDomain: custom.example.org
+    TargetURL: https://custom.example.org
 `
 	filePath := "/tmp/test_configs.yaml"
 	err := os.WriteFile(filePath, []byte(fileContent), 0644)
@@ -605,5 +605,5 @@ func TestTargetDomainCustomValue(t *testing.T) {
 	cfg.TestConfigFile = filePath
 	err = loadTestConfigsFromFile(&cfg)
 	require.NoError(t, err)
-	assert.Equal(t, "custom.example.org", cfg.TestConfigs[0].DNSPerf.TargetDomain)
+	assert.Equal(t, "https://custom.example.org", cfg.TestConfigs[0].DNSPerf.TargetURL)
 }

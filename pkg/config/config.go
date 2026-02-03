@@ -155,7 +155,7 @@ type DNSConfig struct {
 	Mode          DNSPerfMode `validate:"omitempty,oneof=Inline NoDelay DelayDeniedPacket DelayDNSResponse"`
 	RunStress     bool        `default:"true" validate:"omitempty"`
 	TestDNSPolicy bool        `default:"true" validate:"omitempty"`
-	TargetDomain  string      `default:"www.example.com" validate:"omitempty,hostname"`
+	TargetURL     string      `default:"http://www.example.com" validate:"omitempty,url"`
 }
 
 // TTFRConfig contains the configuration specific to TTFR tests.
@@ -249,8 +249,8 @@ func defaultAndValidate(cfg *Config) error {
 			tcfg.TestNamespace = "testns"
 		}
 		if tcfg.TestKind == "dnsperf" {
-			if tcfg.DNSPerf.TargetDomain == "" {
-				tcfg.DNSPerf.TargetDomain = "www.example.com"
+			if tcfg.DNSPerf.TargetURL == "" {
+				tcfg.DNSPerf.TargetURL = "http://www.example.com"
 			}
 			if tcfg.DNSPerf.NumDomains < 0 {
 				return fmt.Errorf("NumDomains must be non-negative for a dnsperf test")

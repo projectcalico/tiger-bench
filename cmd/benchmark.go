@@ -153,7 +153,11 @@ func main() {
 			}
 		case config.TestKindDNSPerf:
 			if testConfig.DNSPerf.TestDNSPolicy {
-				_, err = policy.GetOrCreateDNSPolicy(ctx, clients, dnsperf.MakeDNSPolicy(testConfig.TestNamespace, testPolicyName, testConfig.DNSPerf.NumDomains, testConfig.DNSPerf.TargetDomain))
+				mypol, err := dnsperf.MakeDNSPolicy(testConfig.TestNamespace, testPolicyName, testConfig.DNSPerf.NumDomains, testConfig.DNSPerf.TargetURL)
+				if err != nil {
+					log.WithError(err).Fatal("failed to create dnsperf DNS policy object")
+				}
+				_, err = policy.GetOrCreateDNSPolicy(ctx, clients, mypol)
 				if err != nil {
 					log.WithError(err).Fatal("failed to create dnsperf DNS policy")
 				}
