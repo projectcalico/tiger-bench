@@ -1,6 +1,7 @@
 ARG GO_VERSION=1.24.3
 
 FROM golang:${GO_VERSION} AS builder
+ARG TARGETARCH
 
 WORKDIR /benchmark
 COPY cmd cmd
@@ -15,7 +16,7 @@ RUN --mount=type=cache,target=/go/pkg/mod/ \
 ENV GOCACHE=/root/.cache/go-build
 RUN --mount=type=cache,target=/go/pkg/mod/ \
     --mount=type=cache,target="/root/.cache/go-build" \
-    GO111MODULE=on CGO_ENABLED=0 GOOS=linux go build -o /benchmark/benchmark cmd/benchmark.go
+    GO111MODULE=on CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -o /benchmark/benchmark cmd/benchmark.go
 
 RUN mkdir /results
 
@@ -36,7 +37,7 @@ RUN set -e; \
     arm64) \
     ARCH=arm64; \
     EXPECTED_SHA256="ad94ae69b8d70c1d2de5a1eab8e9ce01f50f7be64c35f89ff1ea9cf57c45ce8c" ;; \
-    *) echo "Unsupported architecture: ${TARGETARCH}" ; exit 1 ;; \
+    *) echo "Unsupported architecture: ${TARGETARCH}" >&2 ; exit 1 ;; \
     esac && \
     echo "Downloading aws-iam-authenticator for ${ARCH}..." && \
     curl -L --retry 5 --retry-delay 10 \
