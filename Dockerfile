@@ -20,7 +20,7 @@ RUN --mount=type=cache,target=/go/pkg/mod/ \
 RUN mkdir /results
 
 FROM alpine:3.21
-ARG AWS_IAM_AUTHENTICATOR_URL=https://github.com/kubernetes-sigs/aws-iam-authenticator/releases/download/v0.6.30/aws-iam-authenticator_0.6.30_linux_amd64
+ARG TARGETARCH
 
 RUN apk add --update ca-certificates gettext
 RUN apk add --no-cache aws-cli iperf3 curl
@@ -28,10 +28,16 @@ RUN apk add --no-cache --repository http://dl-3.alpinelinux.org/alpine/edge/test
 COPY --from=builder /results /results
 COPY --from=builder /benchmark/benchmark /benchmark
 
-RUN curl -L --retry 5 --retry-delay 10 \
-  ${AWS_IAM_AUTHENTICATOR_URL} \
-  -o /usr/local/bin/aws-iam-authenticator && \
-  chmod +x /usr/local/bin/aws-iam-authenticator
+RUN set -e; \
+    case "${TARGETARCH}" in \
+    amd64) ARCH=amd64 ;; \
+    arm64) ARCH=arm64 ;; \
+    *) echo "Unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
+    esac && \
+    curl -L --retry 5 --retry-delay 10 \
+    https://github.com/kubernetes-sigs/aws-iam-authenticator/releases/download/v0.6.30/aws-iam-authenticator_0.6.30_linux_${ARCH} \
+    -o /usr/local/bin/aws-iam-authenticator && \
+    chmod +x /usr/local/bin/aws-iam-authenticator
 
 ENV KUBECONFIG="/kubeconfig"
 ENV TESTCONFIGFILE="/testconfig.yaml"
