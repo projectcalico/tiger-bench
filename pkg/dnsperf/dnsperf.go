@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -129,6 +130,30 @@ func MakeDNSPolicy(namespace string, name string, numDomains int, targetURL stri
 	}, nil
 }
 
+// extractPortFromURL extracts the port from a URL, defaulting based on scheme if not present
+// Returns the port number as a string
+func extractPortFromURL(targetURL string) (string, error) {
+	u, err := url.Parse(targetURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse URL: %w", err)
+	}
+
+	// If port is explicitly specified, use it
+	if u.Port() != "" {
+		return u.Port(), nil
+	}
+
+	// Default ports based on scheme
+	switch u.Scheme {
+	case "https":
+		return "443", nil
+	case "http":
+		return "80", nil
+	default:
+		return "80", nil // Default to HTTP port
+	}
+}
+
 // RunDNSPerfTests runs a DNS performance test
 func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *config.TestConfig, webServerImage string, perfImage string) (*Results, error) {
 
@@ -177,6 +202,13 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 		return &results, fmt.Errorf("TargetURL is required for DNS performance tests")
 	}
 
+	// Extract port from target URL for tcpdump filter
+	targetPort, err := extractPortFromURL(targetURL)
+	if err != nil {
+		log.WithError(err).Warn("failed to extract port from TargetURL, defaulting to 80")
+		targetPort = "80"
+	}
+
 	// For curl commands, use the full URL
 	testdomains := []string{targetURL}
 
@@ -205,7 +237,7 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 				continue
 			}
 			go func(tcpdumpPod corev1.Pod, testPod corev1.Pod) {
-				if e := runTCPDump(testctx, clients, &tcpdumpPod, testPod, testConfig.Duration+60); e != nil {
+				if e := runTCPDump(testctx, clients, &tcpdumpPod, testPod, targetPort, testConfig.Duration+60); e != nil {
 					log.WithError(e).Error("failed to run tcpdump")
 				}
 			}(tcpdumpPod, testPod)
@@ -333,7 +365,10 @@ func runDNSPerfTest(ctx context.Context, srcPod *corev1.Pod, target string) (Cur
 	result.Target = target
 	result.Success = true
 	cmdfrag := `curl -m 8 -w '{"time_lookup": %{time_namelookup}, "time_connect": %{time_connect}}\n' -s -o /dev/null`
-	cmd := fmt.Sprintf("%s %s", cmdfrag, target)
+	// Properly quote the target URL to prevent shell injection vulnerabilities
+	// Replace single quotes with the pattern '\'' (end quote, escaped quote, start quote)
+	escapedTarget := strings.ReplaceAll(target, "'", "'\\''")
+	cmd := fmt.Sprintf("%s '%s'", cmdfrag, escapedTarget)
 	stdout, _, err := utils.ExecCommandInPod(ctx, srcPod, cmd, 10)
 	if err != nil {
 		if ctx.Err() == nil { // Only log error if context is still valid
@@ -375,7 +410,7 @@ func checkTestPods(ctx context.Context, clients config.Clients, testpods []corev
 	return nil
 }
 
-func runTCPDump(ctx context.Context, clients config.Clients, pod *corev1.Pod, testPod corev1.Pod, timeout int) error {
+func runTCPDump(ctx context.Context, clients config.Clients, pod *corev1.Pod, testPod corev1.Pod, targetPort string, timeout int) error {
 	log.Debug("entering runTCPDump function")
 
 	err := clients.CtrlClient.Get(ctx, ctrlclient.ObjectKey{Namespace: testPod.Namespace, Name: testPod.Name}, &testPod)
@@ -398,8 +433,8 @@ func runTCPDump(ctx context.Context, clients config.Clients, pod *corev1.Pod, te
 	}
 	log.Infof("nic=%s", nic)
 
-	// run tcpdump command until timeout
-	cmd = fmt.Sprintf(`tcpdump -s0 -w dump.cap -i %s tcp port 80 or tcp port 443`, nic)
+	// run tcpdump command until timeout using the target port
+	cmd = fmt.Sprintf(`tcpdump -s0 -w dump.cap -i %s tcp port %s`, nic, targetPort)
 	var out string
 	out, _, err = utils.ExecCommandInPod(ctx, pod, cmd, timeout+30)
 	if err != nil {
@@ -484,7 +519,8 @@ func processTCPDumpOutput(out string) (int, int, error) {
 					}
 				}
 				seqstr = builder.String()
-				_, err := strconv.Atoi(seqstr)
+				var err error
+				seqNum, err = strconv.Atoi(seqstr)
 				if err != nil {
 					log.WithError(err).Warnf("failed to parse seq number from: %s", tokens[i+1])
 					continue

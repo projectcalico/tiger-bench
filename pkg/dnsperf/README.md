@@ -160,7 +160,7 @@ Each DNS policy mode is likely to show different behaviour.
 - DelayDNSResponse mode delays the DNS response packet until the IP within it has been programmed into the dataplane by calico-node.  This can result in longer lookup times from the PoV of the pod, but the initial connection should succeed.
 - DelayDeniedPacket mode permits the DNS lookup to proceed as normal, but holds the outgoing packets until the dataplane is programmed by calico-node.  This can result in duplicated SYNs as the network stack retries the connection setup.
 
-As you can see, these 3 modes all require calico-node to update the dataplane.  If calico-node is starved of CPU (e.g. low limit) and/or very busy (e.g. lots of policy changes or pod creation/deletion), these delays can be noticable.
+As you can see, these 3 modes all require calico-node to update the dataplane.  If calico-node is starved of CPU (e.g. low limit) and/or very busy (e.g. lots of policy changes or pod creation/deletion), these delays can be noticeable.
 
 The final mode:
 - Inline mode uses a BPF program (which run in a VM in kernel space) to update the dataplane as soon as it sees the DNS response, as part of forwarding the packet.  This happens independently of calico-node and is very fast.
