@@ -33,10 +33,10 @@ RUN set -e; \
     case "${TARGETARCH}" in \
     amd64) \
     ARCH=amd64; \
-    EXPECTED_SHA256="d2c7a53c7cc6ff2e0e1e9ed86c85e6e4fd50da86adb26767b1e8f0518afa6e4b" ;; \
+    EXPECTED_SHA256="a36dd03a75833d5846cb044cfbaaae15800cefa346805647fe454c5d1871d1c6" ;; \
     arm64) \
     ARCH=arm64; \
-    EXPECTED_SHA256="ad94ae69b8d70c1d2de5a1eab8e9ce01f50f7be64c35f89ff1ea9cf57c45ce8c" ;; \
+    EXPECTED_SHA256="f6621ca85dc5c257a53968a2b9fd67bb4e15ca88fcb05eaea96dbb73fd1d991d" ;; \
     *) echo "Unsupported architecture: ${TARGETARCH}" >&2 ; exit 1 ;; \
     esac && \
     echo "Downloading aws-iam-authenticator for ${ARCH}..." && \
