@@ -26,8 +26,6 @@ ARG TARGETARCH
 RUN apk add --update ca-certificates gettext
 RUN apk add --no-cache aws-cli iperf3 curl
 RUN apk add --no-cache --repository http://dl-3.alpinelinux.org/alpine/edge/testing/ qperf
-COPY --from=builder /results /results
-COPY --from=builder /benchmark/benchmark /benchmark
 
 RUN set -e; \
     case "${TARGETARCH}" in \
@@ -47,6 +45,9 @@ RUN set -e; \
     echo "${EXPECTED_SHA256}  /usr/local/bin/aws-iam-authenticator" | sha256sum -c - && \
     chmod +x /usr/local/bin/aws-iam-authenticator && \
     echo "aws-iam-authenticator installed successfully"
+
+COPY --from=builder /results /results
+COPY --from=builder /benchmark/benchmark /benchmark
 
 ENV KUBECONFIG="/kubeconfig"
 ENV TESTCONFIGFILE="/testconfig.yaml"
