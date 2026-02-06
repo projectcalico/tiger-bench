@@ -238,7 +238,9 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 			}
 			go func(tcpdumpPod corev1.Pod, testPod corev1.Pod) {
 				if e := runTCPDump(testctx, clients, &tcpdumpPod, testPod, targetPort, testConfig.Duration+60); e != nil {
-					log.WithError(e).Error("failed to run tcpdump")
+					if !strings.Contains(e.Error(), "context deadline exceeded") {
+						log.WithError(e).Error("failed to run tcpdump")
+					}
 				}
 			}(tcpdumpPod, testPod)
 		}
@@ -438,8 +440,12 @@ func runTCPDump(ctx context.Context, clients config.Clients, pod *corev1.Pod, te
 	var out string
 	out, _, err = utils.ExecCommandInPod(ctx, pod, cmd, timeout+30)
 	if err != nil {
-		log.WithError(err).Error("failed to run tcpdump command")
-		return err
+		if strings.Contains(err.Error(), "context deadline exceeded") {
+			log.WithError(err).Debug("tcpdump context deadline exceeded (expected - tcpdump runs for full test duration)")
+		} else {
+			log.WithError(err).Error("failed to run tcpdump command")
+			return err
+		}
 	}
 	log.Infof("stdout=%s", out)
 
