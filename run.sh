@@ -14,5 +14,7 @@ docker run --rm --net=host \
 -e WEBSERVER_IMAGE="quay.io/tigeradev/tiger-bench-nginx:main" \
 -e PERF_IMAGE="quay.io/tigeradev/tiger-bench-perf:main" \
 quay.io/tigeradev/tiger-bench:latest 2>&1 | tee run_output_$(date +%Y%m%d_%H%M%S).log
-mv results.json results_$(date +%Y%m%d_%H%M%S).json
-mv junit_report.xml junit_report_$(date +%Y%m%d_%H%M%S).xml
+
+# Move results files if they exist
+[ -f results.json ] && mv results.json results_$(date +%Y%m%d_%H%M%S).json
+[ -f junit_report.xml ] && mv junit_report.xml junit_report_$(date +%Y%m%d_%H%M%S).xml

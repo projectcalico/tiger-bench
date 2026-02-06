@@ -242,19 +242,19 @@ func main() {
 
 		// Clean up after test completes
 		cleanupNamespace(ctx, clients, testConfig)
+	}
 
-		// Generate and write JUnit report
-		if cfg.JUnitReportFile != "" {
-			junitReport, err := junit.GenerateJUnitReport(benchmarkResults, startTime)
+	// Generate and write JUnit report after all tests complete
+	if cfg.JUnitReportFile != "" {
+		junitReport, err := junit.GenerateJUnitReport(benchmarkResults, startTime)
+		if err != nil {
+			log.WithError(err).Error("failed to generate JUnit report")
+		} else {
+			err = junit.WriteJUnitReport(cfg.JUnitReportFile, junitReport)
 			if err != nil {
-				log.WithError(err).Error("failed to generate JUnit report")
+				log.WithError(err).Error("failed to write JUnit report")
 			} else {
-				err = junit.WriteJUnitReport(cfg.JUnitReportFile, junitReport)
-				if err != nil {
-					log.WithError(err).Error("failed to write JUnit report")
-				} else {
-					log.Infof("JUnit report written to %s", cfg.JUnitReportFile)
-				}
+				log.Infof("JUnit report written to %s", cfg.JUnitReportFile)
 			}
 		}
 	}
