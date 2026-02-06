@@ -93,21 +93,29 @@ func main() {
 		// Clean up any leftover resources from previous runs
 		cleanupNamespace(ctx, clients, testConfig)
 
-		err = cluster.ConfigureCluster(ctx, cfg, clients, *testConfig)
+		thisResult := results.Result{}
+		thisResult.Config = *testConfig
+		thisResult.ClusterDetails, _ = cluster.GetClusterDetails(ctx, clients)
+		thisResult.Status = "failed"
+
 		if err != nil {
 			log.WithError(err).Error("failed to configure cluster")
+			thisResult.Error = fmt.Sprintf("failed to configure cluster: %v", err)
+			benchmarkResults = append(benchmarkResults, thisResult)
 			cleanupNamespace(ctx, clients, testConfig)
 			continue
 		}
+		// update cluster details after reconfig
+		thisResult.ClusterDetails, _ = cluster.GetClusterDetails(ctx, clients)
 
 		err = cluster.SetupStandingConfig(ctx, clients, *testConfig, testConfig.TestNamespace, cfg.WebServerImage)
 		if err != nil {
 			log.WithError(err).Error("failed to setup standing config on cluster")
+			thisResult.Error = fmt.Sprintf("failed to setup standing config: %v", err)
+			benchmarkResults = append(benchmarkResults, thisResult)
 			cleanupNamespace(ctx, clients, testConfig)
 			continue
 		}
-		thisResult := results.Result{}
-		thisResult.Config = *testConfig
 		switch testConfig.TestKind {
 		case config.TestKindNone:
 			// No test to run
@@ -116,12 +124,16 @@ func main() {
 			err = policy.CreateTestPolicy(ctx, clients, testPolicyName, testConfig.TestNamespace, []int{testConfig.Perf.TestPort})
 			if err != nil {
 				log.WithError(err).Error("failed to create iperf test policy")
+				thisResult.Error = fmt.Sprintf("failed to create iperf test policy: %v", err)
+				benchmarkResults = append(benchmarkResults, thisResult)
 				cleanupNamespace(ctx, clients, testConfig)
 				continue
 			}
 			err = iperf.DeployIperfPods(ctx, clients, testConfig.TestNamespace, testConfig.HostNetwork, cfg.PerfImage, testConfig.Perf.TestPort)
 			if err != nil {
 				log.WithError(err).Error("failed to deploy iperf pods")
+				thisResult.Error = fmt.Sprintf("failed to deploy iperf pods: %v", err)
+				benchmarkResults = append(benchmarkResults, thisResult)
 				cleanupNamespace(ctx, clients, testConfig)
 				continue
 			}
@@ -144,12 +156,16 @@ func main() {
 			err = policy.CreateTestPolicy(ctx, clients, testPolicyName, testConfig.TestNamespace, []int{testConfig.Perf.ControlPort, testConfig.Perf.TestPort})
 			if err != nil {
 				log.WithError(err).Error("failed to create qperf test policy")
+				thisResult.Error = fmt.Sprintf("failed to create qperf test policy: %v", err)
+				benchmarkResults = append(benchmarkResults, thisResult)
 				cleanupNamespace(ctx, clients, testConfig)
 				continue
 			}
 			err = qperf.DeployQperfPods(ctx, clients, testConfig.TestNamespace, testConfig.HostNetwork, cfg.PerfImage, testConfig.Perf.ControlPort, testConfig.Perf.TestPort)
 			if err != nil {
 				log.WithError(err).Error("failed to deploy qperf pods")
+				thisResult.Error = fmt.Sprintf("failed to deploy qperf pods: %v", err)
+				benchmarkResults = append(benchmarkResults, thisResult)
 				cleanupNamespace(ctx, clients, testConfig)
 				continue
 			}
@@ -173,12 +189,16 @@ func main() {
 				mypol, err := dnsperf.MakeDNSPolicy(testConfig.TestNamespace, testPolicyName, testConfig.DNSPerf.NumDomains, testConfig.DNSPerf.TargetURL)
 				if err != nil {
 					log.WithError(err).Error("failed to create dnsperf DNS policy object")
+					thisResult.Error = fmt.Sprintf("failed to create dnsperf DNS policy object: %v", err)
+					benchmarkResults = append(benchmarkResults, thisResult)
 					cleanupNamespace(ctx, clients, testConfig)
 					continue
 				}
 				_, err = policy.GetOrCreateDNSPolicy(ctx, clients, mypol)
 				if err != nil {
 					log.WithError(err).Error("failed to create dnsperf DNS policy")
+					thisResult.Error = fmt.Sprintf("failed to create dnsperf DNS policy: %v", err)
+					benchmarkResults = append(benchmarkResults, thisResult)
 					cleanupNamespace(ctx, clients, testConfig)
 					continue
 				}
@@ -194,6 +214,8 @@ func main() {
 			err := policy.CreateTestPolicy(ctx, clients, testPolicyName, testConfig.TestNamespace, []int{8080})
 			if err != nil {
 				log.WithError(err).Error("failed to create ttfr test policy")
+				thisResult.Error = fmt.Sprintf("failed to create ttfr test policy: %v", err)
+				benchmarkResults = append(benchmarkResults, thisResult)
 				cleanupNamespace(ctx, clients, testConfig)
 				continue
 			}
@@ -214,8 +236,14 @@ func main() {
 			}
 		default:
 			log.Error("test type unknown")
+			thisResult.Error = fmt.Sprintf("unknown test type: %s", testConfig.TestKind)
+
+			benchmarkResults = append(benchmarkResults, thisResult)
 			cleanupNamespace(ctx, clients, testConfig)
 			continue
+		}
+		if thisResult.Error == "" {
+			thisResult.Status = "success"
 		}
 		// If we set the CPU limit, unset it again.
 		if testConfig.CalicoNodeCPULimit != "" {
@@ -223,10 +251,6 @@ func main() {
 			if err != nil {
 				log.WithError(err).Error("failed to reset calico node CPU limit")
 			}
-		}
-		thisResult.ClusterDetails, err = cluster.GetClusterDetails(ctx, clients)
-		if err != nil {
-			log.WithError(err).Error("error getting cluster details")
 		}
 		log.Debugf("Result: %+v", thisResult)
 		err = elasticsearch.UploadResult(cfg, thisResult, false)

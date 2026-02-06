@@ -27,57 +27,57 @@ import (
 	"github.com/projectcalico/tiger-bench/pkg/stats"
 )
 
-// JUnitTestSuites represents the top-level JUnit XML structure
-type JUnitTestSuites struct {
-	XMLName xml.Name         `xml:"testsuites"`
-	Suites  []JUnitTestSuite `xml:"testsuite"`
+// TestSuites represents the top-level JUnit XML structure
+type TestSuites struct {
+	XMLName xml.Name    `xml:"testsuites"`
+	Suites  []TestSuite `xml:"testsuite"`
 }
 
-// JUnitTestSuite represents a test suite
-type JUnitTestSuite struct {
-	Name      string          `xml:"name,attr"`
-	Tests     int             `xml:"tests,attr"`
-	Failures  int             `xml:"failures,attr"`
-	Errors    int             `xml:"errors,attr"`
-	Skipped   int             `xml:"skipped,attr"`
-	Time      float64         `xml:"time,attr"`
-	Timestamp string          `xml:"timestamp,attr"`
-	TestCases []JUnitTestCase `xml:"testcase"`
+// TestSuite represents a test suite
+type TestSuite struct {
+	Name      string     `xml:"name,attr"`
+	Tests     int        `xml:"tests,attr"`
+	Failures  int        `xml:"failures,attr"`
+	Errors    int        `xml:"errors,attr"`
+	Skipped   int        `xml:"skipped,attr"`
+	Time      float64    `xml:"time,attr"`
+	Timestamp string     `xml:"timestamp,attr"`
+	TestCases []TestCase `xml:"testcase"`
 }
 
-// JUnitTestCase represents a single test case
-type JUnitTestCase struct {
-	Name      string          `xml:"name,attr"`
-	Classname string          `xml:"classname,attr"`
-	Time      float64         `xml:"time,attr"`
-	Failure   *JUnitFailure   `xml:"failure,omitempty"`
-	Error     *JUnitError     `xml:"error,omitempty"`
-	Skipped   *JUnitSkipped   `xml:"skipped,omitempty"`
-	SystemOut string          `xml:"system-out,omitempty"`
+// TestCase represents a single test case
+type TestCase struct {
+	Name      string   `xml:"name,attr"`
+	Classname string   `xml:"classname,attr"`
+	Time      float64  `xml:"time,attr"`
+	Failure   *Failure `xml:"failure,omitempty"`
+	Error     *Error   `xml:"error,omitempty"`
+	Skipped   *Skipped `xml:"skipped,omitempty"`
+	SystemOut string   `xml:"system-out,omitempty"`
 }
 
-// JUnitFailure represents a test failure
-type JUnitFailure struct {
+// Failure represents a test failure
+type Failure struct {
 	Message string `xml:"message,attr"`
 	Type    string `xml:"type,attr"`
 	Content string `xml:",chardata"`
 }
 
-// JUnitError represents a test error
-type JUnitError struct {
+// Error represents a test error
+type Error struct {
 	Message string `xml:"message,attr"`
 	Type    string `xml:"type,attr"`
 	Content string `xml:",chardata"`
 }
 
-// JUnitSkipped represents a skipped test
-type JUnitSkipped struct {
+// Skipped represents a skipped test
+type Skipped struct {
 	Message string `xml:"message,attr,omitempty"`
 }
 
-// GenerateJUnitReport creates a JUnit XML report from benchmark results
-func GenerateJUnitReport(benchmarkResults []results.Result, startTime time.Time) (JUnitTestSuites, error) {
-	suites := JUnitTestSuites{}
+// GenerateReport creates a JUnit XML report from benchmark results
+func GenerateReport(benchmarkResults []results.Result, startTime time.Time) (TestSuites, error) {
+	suites := TestSuites{}
 
 	// Group results by test type
 	testsByType := make(map[config.TestKind][]results.Result)
@@ -88,10 +88,10 @@ func GenerateJUnitReport(benchmarkResults []results.Result, startTime time.Time)
 
 	// Create a suite for each test type
 	for testKind, testResults := range testsByType {
-		suite := JUnitTestSuite{
+		suite := TestSuite{
 			Name:      string(testKind),
 			Timestamp: startTime.Format(time.RFC3339),
-			TestCases: []JUnitTestCase{},
+			TestCases: []TestCase{},
 		}
 
 		for _, result := range testResults {
@@ -118,15 +118,20 @@ func GenerateJUnitReport(benchmarkResults []results.Result, startTime time.Time)
 	return suites, nil
 }
 
-// createTestCase converts a benchmark result to a JUnit test case
-func createTestCase(result results.Result) JUnitTestCase {
-	tc := JUnitTestCase{
+// GenerateJUnitReport is the legacy name for GenerateReport.
+func GenerateJUnitReport(benchmarkResults []results.Result, startTime time.Time) (TestSuites, error) {
+	return GenerateReport(benchmarkResults, startTime)
+}
+
+// createTestCase converts a benchmark result to a  test case
+func createTestCase(result results.Result) TestCase {
+	tc := TestCase{
 		Classname: fmt.Sprintf("tiger-bench.%s", result.Config.TestKind),
 		Time:      float64(result.Config.Duration),
 	}
 
 	// Generate a descriptive test name
-	testName := generateTestName(result.Config)
+	testName := generateTestName(result)
 	tc.Name = testName
 
 	// Build system output with key metrics
@@ -135,7 +140,7 @@ func createTestCase(result results.Result) JUnitTestCase {
 	// Determine if test passed or failed based on results
 	failed, errorMsg := isTestFailed(result)
 	if failed {
-		tc.Failure = &JUnitFailure{
+		tc.Failure = &Failure{
 			Message: errorMsg,
 			Type:    "TestFailure",
 			Content: errorMsg,
@@ -146,27 +151,27 @@ func createTestCase(result results.Result) JUnitTestCase {
 }
 
 // generateTestName creates a descriptive name for the test
-func generateTestName(cfg config.TestConfig) string {
-	name := fmt.Sprintf("%s", cfg.TestKind)
+func generateTestName(result results.Result) string {
+	name := string(result.Config.TestKind)
 
-	if cfg.Dataplane != "" {
-		name += fmt.Sprintf("_dataplane=%s", cfg.Dataplane)
+	if result.ClusterDetails.Dataplane != "" {
+		name += fmt.Sprintf("_dataplane=%s", result.ClusterDetails.Dataplane)
 	}
 
-	if cfg.NumPolicies > 0 {
-		name += fmt.Sprintf("_policies=%d", cfg.NumPolicies)
+	if result.Config.NumPolicies > 0 {
+		name += fmt.Sprintf("_policies=%d", result.Config.NumPolicies)
 	}
 
-	if cfg.HostNetwork {
+	if result.Config.HostNetwork {
 		name += "_hostNetwork"
 	}
 
-	if cfg.CalicoNodeCPULimit != "" {
-		name += fmt.Sprintf("_cpuLimit=%s", cfg.CalicoNodeCPULimit)
+	if result.Config.CalicoNodeCPULimit != "" {
+		name += fmt.Sprintf("_cpuLimit=%s", result.Config.CalicoNodeCPULimit)
 	}
 
-	if cfg.DNSPerf != nil && cfg.DNSPerf.Mode != "" {
-		name += fmt.Sprintf("_dnsMode=%s", cfg.DNSPerf.Mode)
+	if result.Config.DNSPerf != nil && result.Config.DNSPerf.Mode != "" {
+		name += fmt.Sprintf("_dnsMode=%s", result.Config.DNSPerf.Mode)
 	}
 
 	return name
@@ -175,12 +180,12 @@ func generateTestName(cfg config.TestConfig) string {
 // buildSystemOutput generates detailed test output
 func buildSystemOutput(result results.Result) string {
 	output := fmt.Sprintf("Test: %s\n", result.Config.TestKind)
-	output += fmt.Sprintf("Dataplane: %s\n", result.Config.Dataplane)
 	output += fmt.Sprintf("Num Policies: %d\n", result.Config.NumPolicies)
 	output += fmt.Sprintf("Duration: %ds\n", result.Config.Duration)
 	output += fmt.Sprintf("Iterations: %d\n\n", result.Config.Iterations)
 
 	// Add cluster details
+	output += fmt.Sprintf("Dataplane: %s\n", result.ClusterDetails.Dataplane)
 	output += fmt.Sprintf("Provisioner: %s\n", result.ClusterDetails.Provisioner)
 	output += fmt.Sprintf("Calico Version: %s\n", result.ClusterDetails.CalicoVersion)
 	output += fmt.Sprintf("Kubernetes Version: %s\n\n", result.ClusterDetails.K8SVersion)
@@ -188,7 +193,7 @@ func buildSystemOutput(result results.Result) string {
 	// Add test-specific results
 	switch result.Config.TestKind {
 	case config.TestKindTTFR:
-		if result.TTFR != nil && len(result.TTFR) > 0 {
+		if len(result.TTFR) > 0 {
 			output += "TTFR Results:\n"
 			for _, ttfr := range result.TTFR {
 				output += fmt.Sprintf("  Average: %.2fms (Min: %.2fms, Max: %.2fms)\n",
@@ -232,10 +237,13 @@ func buildSystemOutput(result results.Result) string {
 
 // isTestFailed determines if a test should be marked as failed
 func isTestFailed(result results.Result) (bool, string) {
+	if result.Error != "" || result.Status == "failed" {
+		return true, fmt.Sprintf("Test error: %s", result.Error)
+	}
 	// Check if we got any results for the test type
 	switch result.Config.TestKind {
 	case config.TestKindTTFR:
-		if result.TTFR == nil || len(result.TTFR) == 0 {
+		if len(result.TTFR) == 0 {
 			return true, "No TTFR results collected"
 		}
 	case config.TestKindIperf:
@@ -297,8 +305,8 @@ func appendStatsSummary(output *string, label string, summary stats.ResultSummar
 	)
 }
 
-// WriteJUnitReport writes the JUnit XML report to a file
-func WriteJUnitReport(filename string, suites JUnitTestSuites) error {
+// WriteReport writes the JUnit XML report to a file
+func WriteReport(filename string, suites TestSuites) error {
 	log.Infof("Writing JUnit report to %s", filename)
 
 	file, err := os.Create(filename)
@@ -322,4 +330,9 @@ func WriteJUnitReport(filename string, suites JUnitTestSuites) error {
 	}
 
 	return nil
+}
+
+// WriteJUnitReport is the legacy name for WriteReport.
+func WriteJUnitReport(filename string, suites TestSuites) error {
+	return WriteReport(filename, suites)
 }

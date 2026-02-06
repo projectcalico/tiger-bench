@@ -69,11 +69,11 @@ func TestGenerateJUnitReport(t *testing.T) {
 	testResults := []results.Result{
 		{
 			Config: config.TestConfig{
-				TestKind:   config.TestKindTTFR,
-				Dataplane:  "iptables",
+				TestKind:    config.TestKindTTFR,
+				Dataplane:   "iptables",
 				NumPolicies: 10,
-				Duration:   30,
-				Iterations: 3,
+				Duration:    30,
+				Iterations:  3,
 			},
 			ClusterDetails: cluster.Details{
 				Provisioner:   "kind",
@@ -110,11 +110,11 @@ func TestGenerateJUnitReport(t *testing.T) {
 		},
 		{
 			Config: config.TestConfig{
-				TestKind:   config.TestKindQperf,
-				Dataplane:  "nftables",
+				TestKind:    config.TestKindQperf,
+				Dataplane:   "nftables",
 				NumPolicies: 25,
-				Duration:   30,
-				Iterations: 5,
+				Duration:    30,
+				Iterations:  5,
 			},
 			ClusterDetails: cluster.Details{
 				Provisioner:   "kind",
@@ -195,8 +195,8 @@ func TestGenerateJUnitReport(t *testing.T) {
 
 func TestWriteJUnitReport(t *testing.T) {
 	// Create a simple test report
-	suites := JUnitTestSuites{
-		Suites: []JUnitTestSuite{
+	suites := TestSuites{
+		Suites: []TestSuite{
 			{
 				Name:      "ttfr",
 				Tests:     1,
@@ -204,7 +204,7 @@ func TestWriteJUnitReport(t *testing.T) {
 				Errors:    0,
 				Time:      30.5,
 				Timestamp: time.Now().Format(time.RFC3339),
-				TestCases: []JUnitTestCase{
+				TestCases: []TestCase{
 					{
 						Name:      "ttfr_dataplane=iptables",
 						Classname: "tiger-bench.ttfr",
@@ -232,7 +232,7 @@ func TestWriteJUnitReport(t *testing.T) {
 	}
 
 	// Try to unmarshal to verify it's valid XML
-	var parsedSuites JUnitTestSuites
+	var parsedSuites TestSuites
 	err = xml.Unmarshal(data, &parsedSuites)
 	if err != nil {
 		t.Fatalf("Generated XML is invalid: %v", err)
@@ -251,44 +251,60 @@ func TestWriteJUnitReport(t *testing.T) {
 func TestGenerateTestName(t *testing.T) {
 	tests := []struct {
 		name     string
-		config   config.TestConfig
+		result   results.Result
 		expected string
 	}{
 		{
 			name: "Basic TTFR test",
-			config: config.TestConfig{
-				TestKind:  config.TestKindTTFR,
-				Dataplane: "iptables",
+			result: results.Result{
+				Config: config.TestConfig{
+					TestKind: config.TestKindTTFR,
+				},
+				ClusterDetails: cluster.Details{
+					Dataplane: "iptables",
+				},
 			},
 			expected: "ttfr_dataplane=iptables",
 		},
 		{
 			name: "DNSPerf with mode",
-			config: config.TestConfig{
-				TestKind:  config.TestKindDNSPerf,
-				Dataplane: "bpf",
-				DNSPerf: &config.DNSConfig{
-					Mode: "Inline",
+			result: results.Result{
+				Config: config.TestConfig{
+					TestKind: config.TestKindDNSPerf,
+					DNSPerf: &config.DNSConfig{
+						Mode: "Inline",
+					},
+				},
+				ClusterDetails: cluster.Details{
+					Dataplane: "bpf",
 				},
 			},
 			expected: "dnsperf_dataplane=bpf_dnsMode=Inline",
 		},
 		{
 			name: "IPerf with policies and host network",
-			config: config.TestConfig{
-				TestKind:    config.TestKindIperf,
-				Dataplane:   "nftables",
-				NumPolicies: 100,
-				HostNetwork: true,
+			result: results.Result{
+				Config: config.TestConfig{
+					TestKind:    config.TestKindIperf,
+					NumPolicies: 100,
+					HostNetwork: true,
+				},
+				ClusterDetails: cluster.Details{
+					Dataplane: "nftables",
+				},
 			},
 			expected: "iperf_dataplane=nftables_policies=100_hostNetwork",
 		},
 		{
 			name: "QPerf with CPU limit",
-			config: config.TestConfig{
-				TestKind:            config.TestKindQperf,
-				Dataplane:           "iptables",
-				CalicoNodeCPULimit:  "2",
+			result: results.Result{
+				Config: config.TestConfig{
+					TestKind:           config.TestKindQperf,
+					CalicoNodeCPULimit: "2",
+				},
+				ClusterDetails: cluster.Details{
+					Dataplane: "iptables",
+				},
 			},
 			expected: "thruput-latency_dataplane=iptables_cpuLimit=2",
 		},
@@ -296,7 +312,7 @@ func TestGenerateTestName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := generateTestName(tt.config)
+			result := generateTestName(tt.result)
 			if result != tt.expected {
 				t.Errorf("generateTestName() = %q, want %q", result, tt.expected)
 			}
