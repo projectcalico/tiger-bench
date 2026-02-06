@@ -24,6 +24,8 @@ import (
 	"strconv"
 
 	log "github.com/sirupsen/logrus"
+	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/projectcalico/tiger-bench/pkg/cluster"
 	"github.com/projectcalico/tiger-bench/pkg/config"
@@ -33,11 +35,15 @@ import (
 	"github.com/projectcalico/tiger-bench/pkg/policy"
 	"github.com/projectcalico/tiger-bench/pkg/qperf"
 	"github.com/projectcalico/tiger-bench/pkg/results"
+	"github.com/projectcalico/tiger-bench/pkg/stats"
 	"github.com/projectcalico/tiger-bench/pkg/ttfr"
 	"github.com/projectcalico/tiger-bench/pkg/utils"
 )
 
 func main() {
+	// Initialize controller-runtime logger to avoid "log.SetLogger(...) was never called" warning
+	ctrllog.SetLogger(zap.New())
+
 	log.SetReportCaller(true)
 	log.SetLevel(log.InfoLevel)
 	customFormatter := &log.TextFormatter{
@@ -66,6 +72,17 @@ func main() {
 	const (
 		testPolicyName = "zzz-perf-test-policy"
 	)
+
+	// Validate test node prerequisites
+	if clients.CtrlClient != nil {
+		err = validateTestNodes(ctx, clients, cfg.TestConfigs)
+		if err != nil {
+			log.WithError(err).Fatal("test node validation failed")
+		}
+	} else {
+		log.Warn("Skipping test node validation - no kubeconfig configured")
+	}
+
 	var benchmarkResults []results.Result
 	log.Debug("Starting tests")
 	log.Debug("Number of TestConfigs: ", len(cfg.TestConfigs))
@@ -136,9 +153,13 @@ func main() {
 			}
 		case config.TestKindDNSPerf:
 			if testConfig.DNSPerf.TestDNSPolicy {
-				_, err = policy.GetOrCreateDNSPolicy(ctx, clients, dnsperf.MakeDNSPolicy(testConfig.TestNamespace, testPolicyName, testConfig.DNSPerf.NumDomains))
+				mypol, err := dnsperf.MakeDNSPolicy(testConfig.TestNamespace, testPolicyName, testConfig.DNSPerf.NumDomains, testConfig.DNSPerf.TargetURL)
 				if err != nil {
-					log.WithError(err).Fatal("failed to create dnsperf policy")
+					log.WithError(err).Fatal("failed to create dnsperf DNS policy object")
+				}
+				_, err = policy.GetOrCreateDNSPolicy(ctx, clients, mypol)
+				if err != nil {
+					log.WithError(err).Fatal("failed to create dnsperf DNS policy")
 				}
 			}
 			thisResult.DNSPerf, err = dnsperf.RunDNSPerfTests(ctx, clients, testConfig, cfg.WebServerImage, cfg.PerfImage)
@@ -249,8 +270,43 @@ func cleanupNamespace(ctx context.Context, clients config.Clients, testConfig *c
 		if err != nil {
 			log.WithError(err).Error("failed to delete netpols")
 		}
+		err = utils.DeleteCalicoNetworkPoliciesInNamespace(ctx, clients, testConfig.TestNamespace)
+		if err != nil {
+			log.WithError(err).Error("failed to delete Calico network policies")
+		}
+		err = utils.DeleteDeploymentsWithPrefix(ctx, clients, testConfig.TestNamespace, "dnsscale")
+		if err != nil {
+			log.WithError(err).Error("failed to delete dnsscale deployments")
+		}
 		log.Info("Cleanup complete")
 	}
+}
+
+func validateTestNodes(ctx context.Context, clients config.Clients, testConfigs []*config.TestConfig) error {
+	log.Info("Validating test nodes...")
+	testNodes, err := stats.GetTestNodes(ctx, clients)
+	if err != nil {
+		return fmt.Errorf("failed to get test nodes: %w", err)
+	}
+
+	if len(testNodes) == 0 {
+		return fmt.Errorf("no nodes found with label tigera.io/test-nodepool=default-pool. Please label nodes with: kubectl label node <nodename> tigera.io/test-nodepool=default-pool")
+	}
+
+	// Check if any test requires 2+ nodes
+	requiresTwoNodes := false
+	for _, testConfig := range testConfigs {
+		if testConfig.TestKind == config.TestKindQperf || testConfig.TestKind == config.TestKindIperf {
+			requiresTwoNodes = true
+		}
+	}
+
+	if len(testNodes) < 2 && requiresTwoNodes {
+		return fmt.Errorf("only %d node(s) found with label tigera.io/test-nodepool=default-pool, but thruput-latency or iperf tests require at least 2 nodes. Please label at least 2 nodes with: kubectl label node <nodename> tigera.io/test-nodepool=default-pool", len(testNodes))
+	}
+
+	log.Infof("Found %d test node(s) with label tigera.io/test-nodepool=default-pool: %v", len(testNodes), testNodes)
+	return nil
 }
 
 func writeResultToFile(filename string, results []results.Result) (err error) {

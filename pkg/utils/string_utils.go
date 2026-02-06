@@ -15,7 +15,9 @@
 package utils
 
 import (
+	"fmt"
 	"math/rand"
+	"net/url"
 	"strings"
 )
 
@@ -35,4 +37,26 @@ func RandomString(length int) string {
 		b[i] = charset[rand.Intn(len(charset))]
 	}
 	return string(b)
+}
+
+// ExtractDomainFromURL extracts the domain/hostname from a URL string
+// It uses net/url for reliable parsing of URLs with various formats
+func ExtractDomainFromURL(urlStr string) (string, error) {
+	// If it doesn't have a scheme, fail early
+	if !strings.Contains(urlStr, "://") {
+		return "", fmt.Errorf("invalid URL: missing scheme (http:// or https://)")
+	}
+
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse URL: %w", err)
+	}
+
+	// Hostname() returns the hostname without port (and without brackets for IPv6)
+	hostname := u.Hostname()
+	if hostname == "" {
+		return "", fmt.Errorf("failed to extract hostname from URL")
+	}
+
+	return hostname, nil
 }

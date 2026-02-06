@@ -107,27 +107,122 @@ func patchFelixConfig(ctx context.Context, clients config.Clients, testConfig co
 	log.Infof("Patching felixconfig to use %s dnspolicymode", dnsPolicyMode)
 	v3PolicyMode := v3.DNSPolicyModeNoDelay
 	v3BPFDNSPolicyMode := v3.BPFDNSPolicyModeNoDelay
-	if testConfig.Dataplane == config.DataPlaneIPTables {
-		if dnsPolicyMode == "DelayDNSResponse" {
+	v3NFTPolicyMode := v3.NFTablesDNSPolicyModeNoDelay
+	// get current dataplane from Installation
+	var installation operatorv1.Installation
+	err = clients.CtrlClient.Get(ctx, ctrlclient.ObjectKey{Name: "default"}, &installation)
+	if err != nil {
+		log.WithError(err).Error("failed to get installation")
+		return err
+	}
+	dataplane := installation.Spec.CalicoNetwork.LinuxDataplane
+	log.Infof("Current dataplane is %s", *dataplane)
+
+	switch *dataplane {
+	case operatorv1.LinuxDataplaneIptables:
+		switch dnsPolicyMode {
+		case "DelayDNSResponse":
 			v3PolicyMode = v3.DNSPolicyModeDelayDNSResponse
-		} else if dnsPolicyMode == "DelayDeniedPacket" {
+		case "DelayDeniedPacket":
 			v3PolicyMode = v3.DNSPolicyModeDelayDeniedPacket
-		} else if dnsPolicyMode == "Inline" {
+		case "Inline":
 			v3PolicyMode = v3.DNSPolicyModeInline
+		case "NoDelay":
+			v3PolicyMode = v3.DNSPolicyModeNoDelay
+		default:
+			return fmt.Errorf("invalid DNS policy mode %s for iptables dataplane", dnsPolicyMode)
 		}
 		felixconfig.Spec.DNSPolicyMode = &v3PolicyMode
-	} else if testConfig.Dataplane == config.DataPlaneBPF {
-		if dnsPolicyMode == "Inline" {
+	case operatorv1.LinuxDataplaneBPF:
+		switch dnsPolicyMode {
+		case "Inline":
 			v3BPFDNSPolicyMode = v3.BPFDNSPolicyModeInline
-		}
-		if dnsPolicyMode == "NoDelay" {
+		case "NoDelay":
 			v3BPFDNSPolicyMode = v3.BPFDNSPolicyModeNoDelay
+		default:
+			return fmt.Errorf("invalid DNS policy mode %s for BPF dataplane", dnsPolicyMode)
 		}
 		felixconfig.Spec.BPFDNSPolicyMode = &v3BPFDNSPolicyMode
+	case operatorv1.LinuxDataplaneNftables:
+		switch dnsPolicyMode {
+		case "DelayDNSResponse":
+			v3NFTPolicyMode = v3.NFTablesDNSPolicyModeDelayDNSResponse
+		case "DelayDeniedPacket":
+			v3NFTPolicyMode = v3.NFTablesDNSPolicyModeDelayDeniedPacket
+		case "NoDelay":
+			v3NFTPolicyMode = v3.NFTablesDNSPolicyModeNoDelay
+		default:
+			return fmt.Errorf("invalid DNS policy mode %s for nftables dataplane", dnsPolicyMode)
+		}
+		felixconfig.Spec.NFTablesDNSPolicyMode = &v3NFTPolicyMode
+	default:
+		return fmt.Errorf("unknown dataplane %s", *dataplane)
 	}
+	updateTime := time.Now()
 	err = clients.CtrlClient.Update(ctx, felixconfig)
+	if err != nil {
+		log.WithError(err).Error("failed to update felixconfig")
+		return err
+	}
 
-	return err
+	// read back felixconfig to verify
+	err = clients.CtrlClient.Get(ctx, ctrlclient.ObjectKey{Name: "default"}, felixconfig)
+	if err != nil {
+		log.WithError(err).Error("failed to get felixconfig after update")
+		return err
+	}
+	log.Debug("felixconfig after update is", felixconfig)
+	if felixconfig.Spec.DNSPolicyMode != nil {
+		log.Infof("felixconfig DNSPolicyMode is now %s", *felixconfig.Spec.DNSPolicyMode)
+	}
+	if felixconfig.Spec.BPFDNSPolicyMode != nil {
+		log.Infof("felixconfig BPFDNSPolicyMode is now %s", *felixconfig.Spec.BPFDNSPolicyMode)
+	}
+	if felixconfig.Spec.NFTablesDNSPolicyMode != nil {
+		log.Infof("felixconfig NFTablesDNSPolicyMode is now %s", *felixconfig.Spec.NFTablesDNSPolicyMode)
+	}
+	switch *dataplane {
+	case operatorv1.LinuxDataplaneIptables:
+		if felixconfig.Spec.DNSPolicyMode == nil || *felixconfig.Spec.DNSPolicyMode != v3PolicyMode {
+			return fmt.Errorf("failed to set DNSPolicyMode to %s", v3PolicyMode)
+		}
+	case operatorv1.LinuxDataplaneBPF:
+		if felixconfig.Spec.BPFDNSPolicyMode == nil || *felixconfig.Spec.BPFDNSPolicyMode != v3BPFDNSPolicyMode {
+			return fmt.Errorf("failed to set BPFDNSPolicyMode to %s", v3BPFDNSPolicyMode)
+		}
+	case operatorv1.LinuxDataplaneNftables:
+		if felixconfig.Spec.NFTablesDNSPolicyMode == nil || *felixconfig.Spec.NFTablesDNSPolicyMode != v3NFTPolicyMode {
+			return fmt.Errorf("failed to set NFTablesDNSPolicyMode to %s", v3NFTPolicyMode)
+		}
+	default:
+		return fmt.Errorf("unknown dataplane %s", *dataplane)
+	}
+
+	// If we're using Inline, check felix logs to verify mode change - if Inline mode is not possible, Felix will fall back to DelayDeniedPacket mode and log this.
+	// The log will be: "Failed to load BPF DNS parser program. Maybe the kernel is old. Falling back to DelayDeniedPacket"
+	if dnsPolicyMode == "Inline" {
+		log.Info("Waiting for felix to log the DNS policy mode change")
+		err = waitForTigeraStatus(ctx, clients, 60, false)
+		if err != nil {
+			return fmt.Errorf("timed out waiting for tigerastatus after updating felixconfig")
+		}
+		log.Info("TigeraStatus is ready")
+
+		time.Sleep(10 * time.Second) // wait a bit for felix to start and log the change
+
+		calicoNodeLogs, err := utils.GetCalicoNodeLogs(ctx, clients, "calico-system", "calico-node", updateTime, "Falling back to DelayDeniedPacket")
+		if err != nil {
+			log.WithError(err).Error("failed to get calico-node logs")
+			return err
+		}
+		// search calico-node logs for "Falling back to DelayDeniedPacket"
+		if calicoNodeLogs != "" {
+			return fmt.Errorf("Felix fell back to DelayDeniedPacket mode - Inline mode may not be supported on this kernel")
+		}
+		log.Info("Felix is using Inline DNS policy mode")
+	}
+
+	return nil
 }
 
 // SetCalicoNodeCPULimit sets the CPU limit for calico-node pods. 0 means remove the limit.

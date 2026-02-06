@@ -19,6 +19,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -58,12 +60,28 @@ type Results struct {
 }
 
 // MakeDNSPolicy Makes a large DNS policy with a fixed bunch of domains and some generated ones
-func MakeDNSPolicy(namespace string, name string, numDomains int) v3.NetworkPolicy {
+func MakeDNSPolicy(namespace string, name string, numDomains int, targetURL string) (v3.NetworkPolicy, error) {
 	udp := numorstring.ProtocolFromString("UDP")
 	orderOne := float64(1)
 
+	// Check that targetURL is not empty
+	if targetURL == "" {
+		return v3.NetworkPolicy{}, fmt.Errorf("targetURL cannot be empty")
+	}
+
+	// Extract just the domain for the DNS policy
+	targetDomain, err := utils.ExtractDomainFromURL(targetURL)
+	if err != nil {
+		return v3.NetworkPolicy{}, fmt.Errorf("failed to extract domain from URL: %w", err)
+	}
+
+	// Check that the targetDomain is not an IP address
+	if net.ParseIP(targetDomain) != nil {
+		return v3.NetworkPolicy{}, fmt.Errorf("Target domain %s appears to be an IP address, which is not supported for DNS policies", targetDomain)
+	}
+
 	var testdomains = []string{
-		"*.test.pod.cluster.local",
+		targetDomain,
 	}
 
 	// Add the real domain we need to test against
@@ -109,6 +127,30 @@ func MakeDNSPolicy(namespace string, name string, numDomains int) v3.NetworkPoli
 				},
 			},
 		},
+	}, nil
+}
+
+// extractPortFromURL extracts the port from a URL, defaulting based on scheme if not present
+// Returns the port number as a string
+func extractPortFromURL(targetURL string) (string, error) {
+	u, err := url.Parse(targetURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse URL: %w", err)
+	}
+
+	// If port is explicitly specified, use it
+	if u.Port() != "" {
+		return u.Port(), nil
+	}
+
+	// Default ports based on scheme
+	switch u.Scheme {
+	case "https":
+		return "443", nil
+	case "http":
+		return "80", nil
+	default:
+		return "80", nil // Default to HTTP port
 	}
 }
 
@@ -141,56 +183,34 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 	if err != nil {
 		return &results, err
 	}
-	// setup tcpdump on nodes (deploy network tools as host-networked daemonset, figure out main interface, run tcpdump)
-	tcpdumppods, err := DeployDNSPerfPods(ctx, clients, true, "tcpdump", testConfig.TestNamespace, perfImage)
-	if err != nil {
-		return &results, err
-	}
-	// setup target pods
-	thisname := fmt.Sprintf("headless%d", 0)
-	_, err = utils.GetOrCreateDeployment(ctx, clients,
-		makeDeployment(
-			testConfig.TestNamespace,
-			thisname,
-			int32(testConfig.DNSPerf.NumTargetPods),
-			false,
-			[]string{"infrastructure"},
-			webServerImage,
-			[]string{},
-		),
-	)
-	if err != nil {
-		return &results, err
-	}
 
-	_, err = utils.WaitForTestPods(ctx, clients, testConfig.TestNamespace, "app=dnsperf")
-	if err != nil {
-		return &results, err
-	}
-
-	var testdomains []string
-	if testConfig.DNSPerf.TargetType == "pod" {
-		log.Info("Using pod FQDNs as targets")
-		testdomains, err = getPodFQDNs(ctx, clients, testConfig.TestNamespace)
+	// setup tcpdump on nodes only if TestDNSPolicy is enabled (deploy network tools as host-networked daemonset, figure out main interface, run tcpdump)
+	var tcpdumppods []corev1.Pod
+	if testConfig.DNSPerf.TestDNSPolicy {
+		tcpdumppods, err = DeployDNSPerfPods(ctx, clients, true, "tcpdump", testConfig.TestNamespace, perfImage)
 		if err != nil {
 			return &results, err
 		}
+	}
+
+	var targetURL string
+	if testConfig.DNSPerf.TargetURL != "" {
+		log.Infof("Using external target URL: %s", testConfig.DNSPerf.TargetURL)
+		targetURL = testConfig.DNSPerf.TargetURL
 	} else {
-		log.Info("Using service FQDNs as targets")
-		svcs := corev1.ServiceList{}
-		err := clients.CtrlClient.List(ctx, &svcs, ctrlclient.InNamespace(testConfig.TestNamespace))
-		if err != nil {
-			log.WithError(err).Error("failed to list services")
-			return &results, err
-		}
-		for _, svc := range svcs.Items {
-			testdomains = append(testdomains, fmt.Sprintf("%s.%s.svc.cluster.local", svc.Name, testConfig.TestNamespace))
-		}
+		log.Error("TargetURL is required but not specified")
+		return &results, fmt.Errorf("TargetURL is required for DNS performance tests")
 	}
-	if len(testdomains) == 0 {
-		log.Info("No test domains found, skipping test")
-		return &results, fmt.Errorf("no test domains found")
+
+	// Extract port from target URL for tcpdump filter
+	targetPort, err := extractPortFromURL(targetURL)
+	if err != nil {
+		log.WithError(err).Warn("failed to extract port from TargetURL, defaulting to 80")
+		targetPort = "80"
 	}
+
+	// For curl commands, use the full URL
+	testdomains := []string{targetURL}
 
 	err = checkTestPods(ctx, clients, testpods)
 	if err != nil {
@@ -202,14 +222,25 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 	log.Debugf("Created test context: %+v", testctx)
 
 	if testConfig.DNSPerf.TestDNSPolicy {
+		// Create a map of tcpdump pods by node name for reliable pairing
+		tcpdumpByNode := make(map[string]corev1.Pod)
+		for _, pod := range tcpdumppods {
+			tcpdumpByNode[pod.Spec.NodeName] = pod
+		}
+
 		// kick off per-node threads to run tcpdump
-		for i, pod := range tcpdumppods {
-			go func() {
-				err = runTCPDump(testctx, clients, &pod, testpods[i], testConfig.Duration+60)
-				if err != nil {
-					log.WithError(err).Error("failed to run tcpdump")
+		for _, testPod := range testpods {
+			// Look up the corresponding tcpdump pod by node name
+			tcpdumpPod, ok := tcpdumpByNode[testPod.Spec.NodeName]
+			if !ok {
+				log.Warnf("No tcpdump pod found for node %s, skipping tcpdump for this node", testPod.Spec.NodeName)
+				continue
+			}
+			go func(tcpdumpPod corev1.Pod, testPod corev1.Pod) {
+				if e := runTCPDump(testctx, clients, &tcpdumpPod, testPod, targetPort, testConfig.Duration+60); e != nil {
+					log.WithError(e).Error("failed to run tcpdump")
 				}
-			}()
+			}(tcpdumpPod, testPod)
 		}
 		log.Info("tcpdump threads started")
 	}
@@ -219,16 +250,18 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 	}
 
 	// kick off per-node threads to run curl commands
-	var rawresults []CurlResult
+	resultsChan := make(chan CurlResult, len(testpods)*10)
 	var wg sync.WaitGroup
+
+	// Launch worker goroutines that send results to channel
 	for _, pod := range testpods {
 		wg.Add(1)
-		go func() {
+		go func(testPod corev1.Pod) {
 			defer wg.Done()
 			i := 0
 			for {
 				domain := testdomains[i%(len(testdomains))]
-				result, err := runDNSPerfTest(testctx, &pod, domain)
+				result, err := runDNSPerfTest(testctx, &testPod, domain)
 				if testctx.Err() != nil {
 					// Probably ctx expiry or cancellation, don't append result or log errors in this case
 					break
@@ -239,14 +272,25 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 					// Since Connectime includes LookupTime, we need to subtract LookupTime from ConnectTime to get the actual connect time
 					result.ConnectTime = result.ConnectTime - result.LookupTime
 				}
-				log.Debugf("appending result: %+v", result)
-				rawresults = append(rawresults, result)
+				log.Debugf("sending result: %+v", result)
+				resultsChan <- result
 				log.Debugf("current test context: %+v", testctx)
 				i++
 			}
-		}()
+		}(pod)
 	}
-	wg.Wait()
+
+	// Close channel when all workers are done
+	go func() {
+		wg.Wait()
+		close(resultsChan)
+	}()
+
+	// Aggregate results from channel in single goroutine
+	var rawresults []CurlResult
+	for result := range resultsChan {
+		rawresults = append(rawresults, result)
+	}
 
 	log.Debugf("rawresults: %+v", rawresults)
 	results = processResults(rawresults)
@@ -254,6 +298,7 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 	if testConfig.DNSPerf.TestDNSPolicy {
 		// add up the duplicate SYN numbers from each tcpdump pod
 		results.DuplicateSYN = 0
+		results.DuplicateSYNACK = 0
 		for _, pod := range tcpdumppods {
 			duplicateSYN, duplicateSYNACK, err := countDuplicateSYN(ctx, &pod)
 			if err != nil {
@@ -265,25 +310,6 @@ func RunDNSPerfTests(ctx context.Context, clients config.Clients, testConfig *co
 	}
 	log.Infof("Results: %+v", results)
 	return &results, nil
-}
-
-func getPodFQDNs(ctx context.Context, clients config.Clients, namespace string) ([]string, error) {
-	log.Debug("entering getPodFQDNs function")
-	var fqdns []string
-	podlist := &corev1.PodList{}
-	err := clients.CtrlClient.List(ctx, podlist, ctrlclient.InNamespace(namespace))
-	if err != nil {
-		return fqdns, fmt.Errorf("failed to list pods")
-	}
-
-	for _, pod := range podlist.Items {
-		if strings.Contains(pod.ObjectMeta.Name, "headless") {
-			podname := utils.SanitizeString(pod.Status.PodIP)
-			fqdns = append(fqdns, fmt.Sprintf("%s.%s.pod.cluster.local", podname, namespace))
-		}
-	}
-	log.Infof("fqdns: %+v", fqdns)
-	return fqdns, nil
 }
 
 func processResults(rawresults []CurlResult) Results {
@@ -339,7 +365,10 @@ func runDNSPerfTest(ctx context.Context, srcPod *corev1.Pod, target string) (Cur
 	result.Target = target
 	result.Success = true
 	cmdfrag := `curl -m 8 -w '{"time_lookup": %{time_namelookup}, "time_connect": %{time_connect}}\n' -s -o /dev/null`
-	cmd := fmt.Sprintf("%s %s:8080", cmdfrag, target)
+	// Properly quote the target URL to prevent shell injection vulnerabilities
+	// Replace single quotes with the pattern '\'' (end quote, escaped quote, start quote)
+	escapedTarget := strings.ReplaceAll(target, "'", "'\\''")
+	cmd := fmt.Sprintf("%s '%s'", cmdfrag, escapedTarget)
 	stdout, _, err := utils.ExecCommandInPod(ctx, srcPod, cmd, 10)
 	if err != nil {
 		if ctx.Err() == nil { // Only log error if context is still valid
@@ -381,7 +410,7 @@ func checkTestPods(ctx context.Context, clients config.Clients, testpods []corev
 	return nil
 }
 
-func runTCPDump(ctx context.Context, clients config.Clients, pod *corev1.Pod, testPod corev1.Pod, timeout int) error {
+func runTCPDump(ctx context.Context, clients config.Clients, pod *corev1.Pod, testPod corev1.Pod, targetPort string, timeout int) error {
 	log.Debug("entering runTCPDump function")
 
 	err := clients.CtrlClient.Get(ctx, ctrlclient.ObjectKey{Namespace: testPod.Namespace, Name: testPod.Name}, &testPod)
@@ -397,16 +426,15 @@ func runTCPDump(ctx context.Context, clients config.Clients, pod *corev1.Pod, te
 		log.WithError(err).Errorf("failed to run ip route command: %s", stderr)
 		return err
 	}
-	nic = strings.Map(func(r rune) rune {
-		if unicode.IsPrint(r) {
-			return r
-		}
-		return -1
-	}, nic)
+	nic = strings.TrimSpace(nic)
+	if nic == "" {
+		log.Error("failed to find interface for pod - interface name is empty")
+		return fmt.Errorf("could not determine interface for pod %s", testPod.Status.PodIP)
+	}
 	log.Infof("nic=%s", nic)
 
-	// run tcpdump command until timeout
-	cmd = fmt.Sprintf(`tcpdump -s0 -w dump.cap -i %s port 8080`, nic)
+	// run tcpdump command until timeout using the target port
+	cmd = fmt.Sprintf(`tcpdump -s0 -w dump.cap -i %s tcp port %s`, nic, targetPort)
 	var out string
 	out, _, err = utils.ExecCommandInPod(ctx, pod, cmd, timeout+30)
 	if err != nil {
@@ -427,10 +455,15 @@ func countDuplicateSYN(ctx context.Context, pod *corev1.Pod) (int, int, error) {
 	for i := 0; i < 10; i++ {
 		cmd := `tcpdump -n -r dump.cap`
 		stdout, stderr, err := utils.ExecCommandInPod(ctx, pod, cmd, 10)
+
+		// Check if we got reasonable tcpdump output (contains packet data)
+		hasPacketData := strings.Contains(stdout, " IP ") && strings.Contains(stdout, "Flags [")
+
 		if err == nil {
 			return processTCPDumpOutput(stdout)
-		} else if strings.Contains(stdout, "truncated dump file") {
-			log.Info("tcpdump file was truncated, ignoring")
+		} else if hasPacketData {
+			// We got packet data even though there was an error (likely truncated/corrupted file at the end)
+			log.WithError(err).Info("tcpdump reported errors but output contains valid packet data, processing anyway")
 			return processTCPDumpOutput(stdout)
 		} else {
 			log.WithError(err).Infof("Hit error running command %s, retrying.  stderr: %s stdout: %s", cmd, stderr, stdout)
@@ -442,56 +475,94 @@ func countDuplicateSYN(ctx context.Context, pod *corev1.Pod) (int, int, error) {
 
 func processTCPDumpOutput(out string) (int, int, error) {
 	log.Debug("entering processTCPDumpOutput function")
+
 	duplicateSYN := 0
 	duplicateSYNACK := 0
 	scanner := bufio.NewScanner(strings.NewReader(out))
-	lastSYNSeq := 0
-	lastSYNACKSeq := 0
+
+	// Track sequence numbers per TCP flow (connection tuple)
+	synSeqMap := make(map[string]int)    // Map of "srcIP:srcPort->dstIP:dstPort" to last SYN seq
+	synackSeqMap := make(map[string]int) // Map of "srcIP:srcPort->dstIP:dstPort" to last SYN-ACK seq
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		log.Infof("line=%s", line)
-		if strings.Contains(line, "IP") && strings.Contains(line, "Flags [S") && !strings.Contains(line, "HTTP") {
-			// store off the seq number
-			tokens := strings.Split(line, " ")
-			for i, token := range tokens {
-				if token == "seq" {
-					// clean off any non-numeric characters, e.g. commas
-					seqstr := tokens[i+1]
-					var builder strings.Builder
-					for _, r := range seqstr {
-						if unicode.IsDigit(r) {
-							builder.WriteRune(r)
-						}
-					}
-					seqstr = builder.String()
-					seq, err := strconv.Atoi(seqstr)
-					if err != nil {
-						return 0, 0, fmt.Errorf("failed to parse seq number")
-					}
-					if strings.Contains(line, "Flags [S]") {
-						log.Debugf("lastSYNSeq=%d  Found seq=%d", lastSYNSeq, seq)
-						// We have a duplicate SYN if the seq number for this SYN packet is the same as the last one
-						if lastSYNSeq == seq {
-							duplicateSYN++
-						}
-						lastSYNSeq = seq
-						break
-					} else if strings.Contains(line, "Flags [S.]") {
-						log.Debugf("lastSYNACKSeq=%d  Found seq=%d", lastSYNACKSeq, seq)
-						// We have a duplicate SYNACK if the seq number for this SYNACK packet is the same as the last one
-						if lastSYNACKSeq == seq {
-							duplicateSYNACK++
-						}
-						lastSYNACKSeq = seq
-						break
-					}
+		log.Debugf("line=%s", line)
+
+		if !strings.Contains(line, "IP") || !strings.Contains(line, "Flags [S") || strings.Contains(line, "HTTP") {
+			continue
+		}
+
+		// Parse connection tuple and sequence number
+		// Expected format: "timestamp IP srcIP.srcPort > dstIP.dstPort: Flags [S], seq NNNN"
+		tokens := strings.Split(line, " ")
+
+		var srcAddr, dstAddr string
+		var seqNum int
+		foundSeq := false
+
+		// Find source and destination addresses
+		for i, token := range tokens {
+			if token == "IP" && i+3 < len(tokens) {
+				srcAddr = tokens[i+1]
+				if tokens[i+2] == ">" {
+					// Remove trailing colon from destination
+					dstAddr = strings.TrimSuffix(tokens[i+3], ":")
 				}
 			}
+			if token == "seq" && i+1 < len(tokens) {
+				// Extract sequence number, removing non-numeric characters
+				seqstr := tokens[i+1]
+				var builder strings.Builder
+				for _, r := range seqstr {
+					if unicode.IsDigit(r) {
+						builder.WriteRune(r)
+					}
+				}
+				seqstr = builder.String()
+				var err error
+				seqNum, err = strconv.Atoi(seqstr)
+				if err != nil {
+					log.WithError(err).Warnf("failed to parse seq number from: %s", tokens[i+1])
+					continue
+				}
+				foundSeq = true
+				break
+			}
+		}
+
+		if !foundSeq || srcAddr == "" || dstAddr == "" {
+			continue
+		}
+
+		// Create connection tuple as key
+		connectionKey := fmt.Sprintf("%s->%s", srcAddr, dstAddr)
+
+		if strings.Contains(line, "Flags [S.]") {
+			// SYN-ACK packet
+			log.Debugf("SYN-ACK on connection %s: seq=%d", connectionKey, seqNum)
+			if lastSeq, exists := synackSeqMap[connectionKey]; exists && lastSeq == seqNum {
+				duplicateSYNACK++
+				log.Debugf("Duplicate SYN-ACK detected on %s: seq=%d", connectionKey, seqNum)
+			}
+			synackSeqMap[connectionKey] = seqNum
+		} else if strings.Contains(line, "Flags [S]") {
+			// SYN packet (but not SYN-ACK)
+			log.Debugf("SYN on connection %s: seq=%d", connectionKey, seqNum)
+			if lastSeq, exists := synSeqMap[connectionKey]; exists && lastSeq == seqNum {
+				duplicateSYN++
+				log.Debugf("Duplicate SYN detected on %s: seq=%d", connectionKey, seqNum)
+			}
+			synSeqMap[connectionKey] = seqNum
 		}
 	}
-	log.Infof("found %d duplicate SYNs", duplicateSYN)
-	log.Infof("found %d duplicate SYNACKs", duplicateSYNACK)
+
+	if err := scanner.Err(); err != nil {
+		log.WithError(err).Error("error reading tcpdump output")
+		return duplicateSYN, duplicateSYNACK, err
+	}
+
+	log.Infof("found %d duplicate SYNs across %d connections", duplicateSYN, len(synSeqMap))
+	log.Infof("found %d duplicate SYNACKs across %d connections", duplicateSYNACK, len(synackSeqMap))
 	return duplicateSYN, duplicateSYNACK, nil
 }
 
@@ -528,6 +599,13 @@ func DeployDNSPerfPods(ctx context.Context, clients config.Clients, hostnet bool
 
 func makeDNSPerfPod(nodename string, namespace string, podname string, image string, hostnetwork bool) corev1.Pod {
 	podname = utils.SanitizeString(podname)
+	runAsUser := int64(1000)
+	runAsGroup := int64(1000)
+	if hostnetwork {
+		// tcpdump needs to run as root
+		runAsUser = 0
+		runAsGroup = 0
+	}
 	pod := corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Labels: map[string]string{
@@ -542,9 +620,9 @@ func makeDNSPerfPod(nodename string, namespace string, podname string, image str
 			AutomountServiceAccountToken: utils.BoolPtr(false),
 			EnableServiceLinks:           utils.BoolPtr(false),
 			SecurityContext: &corev1.PodSecurityContext{
-				RunAsNonRoot: utils.BoolPtr(true),
-				RunAsGroup:   utils.Int64Ptr(1000),
-				RunAsUser:    utils.Int64Ptr(1000),
+				RunAsNonRoot: utils.BoolPtr(!hostnetwork), // tcpdump needs to run as root
+				RunAsGroup:   utils.Int64Ptr(runAsGroup),
+				RunAsUser:    utils.Int64Ptr(runAsUser),
 				SeccompProfile: &corev1.SeccompProfile{
 					Type: corev1.SeccompProfileTypeRuntimeDefault,
 				},
@@ -563,6 +641,12 @@ func makeDNSPerfPod(nodename string, namespace string, podname string, image str
 						ReadOnlyRootFilesystem:   utils.BoolPtr(false),
 						Capabilities: &corev1.Capabilities{
 							Drop: []corev1.Capability{"ALL"},
+							Add: func() []corev1.Capability {
+								if hostnetwork {
+									return []corev1.Capability{"NET_RAW", "NET_ADMIN"}
+								}
+								return nil
+							}(),
 						},
 					},
 					ImagePullPolicy: corev1.PullIfNotPresent,
@@ -575,35 +659,6 @@ func makeDNSPerfPod(nodename string, namespace string, podname string, image str
 	}
 	return pod
 }
-
-// func makeHeadlessSvc(namespace string, svcname string, labels map[string]string) corev1.Service {
-// 	svcname = utils.SanitizeString(svcname)
-// 	return corev1.Service{
-// 		ObjectMeta: metav1.ObjectMeta{
-// 			Labels:    labels,
-// 			Name:      svcname,
-// 			Namespace: namespace,
-// 		},
-// 		Spec: corev1.ServiceSpec{
-// 			ClusterIP: "None",
-// 			Selector:  labels,
-// 			Ports: []corev1.ServicePort{
-// 				{
-// 					Protocol:   "TCP",
-// 					Port:       80,
-// 					TargetPort: intstr.FromInt(80),
-// 					Name:       "http",
-// 				},
-// 				{
-// 					Protocol:   "TCP",
-// 					Port:       443,
-// 					TargetPort: intstr.FromInt(443),
-// 					Name:       "https",
-// 				},
-// 			},
-// 		},
-// 	}
-// }
 
 func makeDeployment(namespace string, depname string, replicas int32, hostnetwork bool, nodelist []string, image string, args []string) appsv1.Deployment {
 	depname = utils.SanitizeString(depname)
@@ -692,6 +747,10 @@ func makeDeployment(namespace string, depname string, replicas int32, hostnetwor
 func scaleDeploymentLoop(ctx context.Context, clients config.Clients, deployment appsv1.Deployment, size int32, sleeptime time.Duration) {
 	log.Debug("entering scaleDeployment function")
 	for {
+		if ctx.Err() != nil {
+			log.Info("Context expired. Quitting scaleDeploymentLoop")
+			return
+		}
 		err := utils.ScaleDeployment(ctx, clients, deployment, size)
 		if err != nil {
 			log.Warning("failed to scale deployment	up")
@@ -701,6 +760,10 @@ func scaleDeploymentLoop(ctx context.Context, clients config.Clients, deployment
 			return
 		}
 		time.Sleep(sleeptime)
+		if ctx.Err() != nil {
+			log.Info("Context expired. Quitting scaleDeploymentLoop")
+			return
+		}
 		err = utils.ScaleDeployment(ctx, clients, deployment, 0)
 		if err != nil {
 			log.Warning("failed to scale deployment	up")
