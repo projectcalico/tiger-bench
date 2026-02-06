@@ -54,6 +54,7 @@ type Config struct {
 	ESAPIKey        string `envconfig:"ELASTICSEARCH_KEY" default:""`
 	TestTimeout     int    `default:"600"`
 	ResultsFile     string `envconfig:"RESULTS_FILE" default:"/results/results.json"`
+	JUnitReportFile string `envconfig:"JUNIT_REPORT_FILE" default:""`
 	CalicoVersion   string `default:""`
 	ProxyAddress    string `envconfig:"HTTP_PROXY" default:""`
 	TestConfigFile  string `envconfig:"TESTCONFIGFILE" required:"true"`

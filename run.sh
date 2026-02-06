@@ -9,7 +9,10 @@ docker run --rm --net=host \
 -e AWS_SECRET_ACCESS_KEY \
 -e AWS_ACCESS_KEY_ID \
 -e AWS_SESSION_TOKEN \
+-e JUNIT_REPORT_FILE=/results/junit_report.xml \
 -e LOG_LEVEL=INFO \
 -e WEBSERVER_IMAGE="quay.io/tigeradev/tiger-bench-nginx:main" \
 -e PERF_IMAGE="quay.io/tigeradev/tiger-bench-perf:main" \
-quay.io/tigeradev/tiger-bench:latest
+quay.io/tigeradev/tiger-bench:latest 2>&1 | tee run_output_$(date +%Y%m%d_%H%M%S).log
+mv results.json results_$(date +%Y%m%d_%H%M%S).json
+mv junit_report.xml junit_report_$(date +%Y%m%d_%H%M%S).xml
