@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -318,6 +319,7 @@ type Details struct {
 	K8SVersion       string
 	CRIVersion       string
 	CNIOption        string
+	ReleaseStream    string
 }
 
 // GetClusterDetails gets details about the cluster
@@ -492,6 +494,12 @@ func GetClusterDetails(ctx context.Context, clients config.Clients) (Details, er
 	details.CRIVersion = testnode.Status.NodeInfo.ContainerRuntimeVersion
 
 	details.CNIOption = installation.Spec.CNI.Type.String()
+
+	// This grabs the RELEASE_STREAM environment variable if it exists, overnight runs use to describe the release chosen for the cluster.
+	// By adding it to the results, we can easily filter and compare overnight runs by release stream in visualisations like Kibana.
+	if releaseStream := os.Getenv("RELEASE_STREAM"); releaseStream != "" {
+		details.ReleaseStream = releaseStream
+	}
 
 	if strings.Contains(testnode.Name, "ip") && strings.Contains(testnode.Name, "compute.internal") {
 		details.Cloud = "aws"
