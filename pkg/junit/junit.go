@@ -158,6 +158,10 @@ func generateTestName(result results.Result) string {
 		name += fmt.Sprintf("_dataplane=%s", result.ClusterDetails.Dataplane)
 	}
 
+	if result.ClusterDetails.ReleaseStream != "" {
+		name += fmt.Sprintf("_releaseStream=%s", result.ClusterDetails.ReleaseStream)
+	}
+
 	if result.Config.NumPolicies > 0 {
 		name += fmt.Sprintf("_policies=%d", result.Config.NumPolicies)
 	}

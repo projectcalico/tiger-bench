@@ -308,6 +308,19 @@ func TestGenerateTestName(t *testing.T) {
 			},
 			expected: "thruput-latency_dataplane=iptables_cpuLimit=2",
 		},
+		{
+			name: "Test with release stream",
+			result: results.Result{
+				Config: config.TestConfig{
+					TestKind: config.TestKindTTFR,
+				},
+				ClusterDetails: cluster.Details{
+					Dataplane:     "bpf",
+					ReleaseStream: "main",
+				},
+			},
+			expected: "ttfr_dataplane=bpf_releaseStream=main",
+		},
 	}
 
 	for _, tt := range tests {
