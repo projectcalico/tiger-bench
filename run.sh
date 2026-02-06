@@ -1,5 +1,7 @@
 #!/bin/bash
 set -ex
+set -o pipefail
+
 docker build -t quay.io/tigeradev/tiger-bench:latest .
 docker run --rm --net=host \
 -v "${PWD}":/results \
@@ -14,6 +16,10 @@ docker run --rm --net=host \
 -e WEBSERVER_IMAGE="quay.io/tigeradev/tiger-bench-nginx:main" \
 -e PERF_IMAGE="quay.io/tigeradev/tiger-bench-perf:main" \
 quay.io/tigeradev/tiger-bench:latest 2>&1 | tee run_output_$(date +%Y%m%d_%H%M%S).log
+DOCKER_EXIT=${PIPESTATUS[0]}
+if [ $DOCKER_EXIT -ne 0 ]; then
+  exit $DOCKER_EXIT
+fi
 
 # Move results files if they exist
 [ -f results.json ] && mv results.json results_$(date +%Y%m%d_%H%M%S).json

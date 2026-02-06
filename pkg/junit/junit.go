@@ -241,8 +241,11 @@ func buildSystemOutput(result results.Result) string {
 
 // isTestFailed determines if a test should be marked as failed
 func isTestFailed(result results.Result) (bool, string) {
-	if result.Error != "" || result.Status == "failed" {
+	if result.Error != "" {
 		return true, fmt.Sprintf("Test error: %s", result.Error)
+	}
+	if result.Status == "failed" {
+		return true, "Test failed"
 	}
 	// Check if we got any results for the test type
 	switch result.Config.TestKind {

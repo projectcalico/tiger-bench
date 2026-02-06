@@ -98,6 +98,7 @@ func main() {
 		thisResult.ClusterDetails, _ = cluster.GetClusterDetails(ctx, clients)
 		thisResult.Status = "failed"
 
+		err = cluster.ConfigureCluster(ctx, cfg, clients, *testConfig)
 		if err != nil {
 			log.WithError(err).Error("failed to configure cluster")
 			thisResult.Error = fmt.Sprintf("failed to configure cluster: %v", err)
