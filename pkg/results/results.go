@@ -34,4 +34,6 @@ type Result struct {
 	IPerf   *iperf.ResultSummary  `json:"iperf,omitempty"`
 	QPerf   *qperf.ResultSummary  `json:"thruput-latency,omitempty"`
 	DNSPerf *dnsperf.Results      `json:"dnsperf,omitempty"`
+	Error   string                `json:"error,omitempty"`
+	Status  string                `json:"status,omitempty"`
 }

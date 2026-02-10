@@ -3,3 +3,6 @@ kubeconfig*
 results.json
 TODO.md
 venv
+run_output*.log
+results*
+junit*.xml
