@@ -34,6 +34,10 @@ jobs:
           version: v1.64.8
       - name: Test
         run: go test -v ./...
+      - name: Run FOSSA scan
+        uses: fossas/fossa-action@v1.3.8
+        with:
+          api-key: ${{ secrets.FOSSA_API_KEY }}
       - name: Run e2e test
         run: make e2e-test
   deploy:
