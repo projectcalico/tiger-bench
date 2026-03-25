@@ -37,7 +37,7 @@ jobs:
       - name: Test
         run: go test -v ./...
       - name: Run FOSSA scan
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && github.repository == 'projectcalico/tiger-bench'
         uses: fossas/fossa-action@c414b9ad82eaad041e47a7cf62a4f02411f427a0  # v1.8.0
         with:
           api-key: ${{ secrets.FOSSA_API_KEY }}
