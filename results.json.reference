@@ -41,8 +41,10 @@
       "CalicoVersion": "v3.30.2",
       "K8SVersion": "v1.32.0",
       "CRIVersion": "containerd://1.7.24",
-      "CNIOption": "Calico"
+      "CNIOption": "Calico",
+      "ReleaseStream": ""
     },
+    "status": "success",
     "thruput-latency": {
       "Latency": {
         "pod-pod": {
@@ -138,8 +140,10 @@
       "CalicoVersion": "v3.30.2",
       "K8SVersion": "v1.32.0",
       "CRIVersion": "containerd://1.7.24",
-      "CNIOption": "Calico"
+      "CNIOption": "Calico",
+      "ReleaseStream": ""
     },
+    "status": "success",
     "iperf": {
       "Retries": {
         "pod-pod": {
@@ -230,8 +234,10 @@
       "CalicoVersion": "v3.30.2",
       "K8SVersion": "v1.32.0",
       "CRIVersion": "containerd://1.7.24",
-      "CNIOption": "Calico"
+      "CNIOption": "Calico",
+      "ReleaseStream": ""
     },
+    "status": "success",
     "ttfr": [
       {
         "ttfrSummary": {
