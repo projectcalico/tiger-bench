@@ -287,20 +287,32 @@ func defaultAndValidate(cfg *Config) error {
 				if tcfg.Perf.ExternalIPOrFQDN == "" {
 					return fmt.Errorf("ExternalIPOrFQDN is required for an external thruput-latency test")
 				}
-				if tcfg.TestKind == "thruput-latency" {
-					if tcfg.Perf.ControlPort == 0 {
-						return fmt.Errorf("ControlPort is required for an external thruput-latency test")
-					}
-					if tcfg.Perf.ControlPort > 65535 || tcfg.Perf.ControlPort < 1 {
-						return fmt.Errorf("ControlPort must be between 1 and 65535")
-					}
+
+				// External ports can't be defaulted. The test tools don't work through NAT, so
+				// these have to match the ports the service is actually exposed on.
+				if tcfg.TestKind == "thruput-latency" && tcfg.Perf.ControlPort == 0 {
+					return fmt.Errorf("ControlPort is required for an external thruput-latency test")
 				}
 				if tcfg.Perf.TestPort == 0 {
 					return fmt.Errorf("TestPort is required for an external thruput-latency test")
 				}
-				if tcfg.Perf.TestPort > 65535 || tcfg.Perf.TestPort < 1 {
-					return fmt.Errorf("TestPort must be between 1 and 65535")
+			} else {
+				// Default the ports per-field rather than only when Perf is absent entirely. A
+				// config that sets some of Perf but leaves the ports out otherwise reaches the
+				// dataplane with port 0, and the apiserver rejects the test policy.
+				if tcfg.Perf.ControlPort == 0 {
+					tcfg.Perf.ControlPort = 32000
 				}
+				if tcfg.Perf.TestPort == 0 {
+					tcfg.Perf.TestPort = 32001
+				}
+			}
+
+			if tcfg.TestKind == "thruput-latency" && (tcfg.Perf.ControlPort > 65535 || tcfg.Perf.ControlPort < 1) {
+				return fmt.Errorf("ControlPort must be between 1 and 65535")
+			}
+			if tcfg.Perf.TestPort > 65535 || tcfg.Perf.TestPort < 1 {
+				return fmt.Errorf("TestPort must be between 1 and 65535")
 			}
 		}
 	}
