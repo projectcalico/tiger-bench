@@ -604,3 +604,62 @@ func TestTargetURLCustomValue(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "https://custom.example.org", cfg.TestConfigs[0].DNSPerf.TargetURL)
 }
+
+func TestPerfPortsDefaultedWhenPerfPartiallySpecified(t *testing.T) {
+	fileContent := `
+- testKind: thruput-latency
+  Perf:
+    direct: true
+    service: true
+    external: false
+`
+	filePath := "/tmp/test_configs.yaml"
+	err := os.WriteFile(filePath, []byte(fileContent), 0o644)
+	require.NoError(t, err)
+	defer os.Remove(filePath)
+
+	var cfg Config
+	cfg.TestConfigFile = filePath
+	err = loadTestConfigsFromFile(&cfg)
+	require.NoError(t, err)
+	assert.Equal(t, 32000, cfg.TestConfigs[0].Perf.ControlPort)
+	assert.Equal(t, 32001, cfg.TestConfigs[0].Perf.TestPort)
+}
+
+func TestPerfPortsStillRequiredForExternalTest(t *testing.T) {
+	fileContent := `
+- testKind: thruput-latency
+  Perf:
+    external: true
+    ExternalIPOrFQDN: perf.example.com
+`
+	filePath := "/tmp/test_configs.yaml"
+	err := os.WriteFile(filePath, []byte(fileContent), 0o644)
+	require.NoError(t, err)
+	defer os.Remove(filePath)
+
+	var cfg Config
+	cfg.TestConfigFile = filePath
+	err = loadTestConfigsFromFile(&cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ControlPort is required")
+}
+
+func TestPerfPortOutOfRangeRejectedForNonExternalTest(t *testing.T) {
+	fileContent := `
+- testKind: thruput-latency
+  Perf:
+    external: false
+    TestPort: 99999
+`
+	filePath := "/tmp/test_configs.yaml"
+	err := os.WriteFile(filePath, []byte(fileContent), 0o644)
+	require.NoError(t, err)
+	defer os.Remove(filePath)
+
+	var cfg Config
+	cfg.TestConfigFile = filePath
+	err = loadTestConfigsFromFile(&cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "TestPort must be between 1 and 65535")
+}
