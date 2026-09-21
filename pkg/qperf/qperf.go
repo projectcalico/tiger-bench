@@ -343,95 +343,25 @@ func DeployQperfPods(ctx context.Context, clients config.Clients, namespace stri
 }
 
 func makeQperfPod(nodename string, namespace string, podname string, image string, hostnetwork bool, controlPort int, testPort int) corev1.Pod {
-	podname = utils.SanitizeString(podname)
-	controlPortStr := strconv.Itoa(controlPort)
-
-	pod := corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Labels: map[string]string{
-				"app": "qperf",
-				"pod": podname,
-			},
-			Name:      podname,
-			Namespace: namespace,
+	return utils.MakePod(utils.PodOptions{
+		Name:        podname,
+		Namespace:   namespace,
+		NodeName:    nodename,
+		Image:       image,
+		App:         "qperf",
+		HostNetwork: hostnetwork,
+		Command:     []string{"/usr/bin/qperf"},
+		Args:        []string{"-lp", strconv.Itoa(controlPort)},
+		Ports: []corev1.ContainerPort{
+			{Name: "control", ContainerPort: int32(controlPort), Protocol: corev1.ProtocolTCP},
+			{Name: "data", ContainerPort: int32(testPort), Protocol: corev1.ProtocolTCP},
 		},
-		Spec: corev1.PodSpec{
-			AutomountServiceAccountToken: utils.BoolPtr(false),
-			SecurityContext: &corev1.PodSecurityContext{
-				RunAsNonRoot: utils.BoolPtr(true),
-				RunAsGroup:   utils.Int64Ptr(1000),
-				RunAsUser:    utils.Int64Ptr(1000),
-				SeccompProfile: &corev1.SeccompProfile{
-					Type: corev1.SeccompProfileTypeRuntimeDefault,
-				},
-			},
-			EnableServiceLinks: utils.BoolPtr(false),
-			Containers: []corev1.Container{
-				{
-					Name:    "qperf",
-					Image:   image,
-					Command: []string{"/usr/bin/qperf"},
-					Args: []string{
-						"-lp",
-						controlPortStr,
-					},
-					SecurityContext: &corev1.SecurityContext{
-						Privileged:               utils.BoolPtr(false),
-						AllowPrivilegeEscalation: utils.BoolPtr(false),
-						ReadOnlyRootFilesystem:   utils.BoolPtr(true),
-						Capabilities: &corev1.Capabilities{
-							Drop: []corev1.Capability{"ALL"},
-						},
-					},
-					Ports: []corev1.ContainerPort{
-						{
-							Name:          "control",
-							ContainerPort: int32(controlPort),
-							Protocol:      corev1.ProtocolTCP,
-						},
-						{
-							Name:          "data",
-							ContainerPort: int32(testPort),
-							Protocol:      corev1.ProtocolTCP,
-						},
-					},
-				},
-			},
-			NodeName:      nodename,
-			RestartPolicy: "OnFailure",
-			HostNetwork:   hostnetwork,
-		},
-	}
-	return pod
+	})
 }
 
 func makeSvc(namespace string, podname string, controlPort int, testPort int) corev1.Service {
-	podname = utils.SanitizeString(podname)
-	svc := corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Labels: map[string]string{
-				"app": "qperf",
-				"pod": podname,
-			},
-			Name:      podname,
-			Namespace: namespace,
-		},
-		Spec: corev1.ServiceSpec{
-			Selector: map[string]string{
-				"app": "qperf",
-				"pod": podname,
-			},
-			Ports: []corev1.ServicePort{
-				{
-					Name: "control",
-					Port: int32(controlPort),
-				},
-				{
-					Name: "data",
-					Port: int32(testPort),
-				},
-			},
-		},
-	}
-	return svc
+	return utils.MakeSvc(namespace, podname, "qperf", []corev1.ServicePort{
+		{Name: "control", Port: int32(controlPort)},
+		{Name: "data", Port: int32(testPort)},
+	})
 }
