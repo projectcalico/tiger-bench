@@ -153,7 +153,10 @@ func main() {
 				log.Warnf("only %d of %d iperf iterations produced results", len(iperfResults), testConfig.Iterations)
 			}
 			if len(iperfResults) == 0 {
-				thisResult.Error = "no iperf iterations produced results"
+				// iterations: 0 is a documented way to set up standing config only.
+				if testConfig.Iterations > 0 {
+					thisResult.Error = "no iperf iterations produced results"
+				}
 			} else {
 				summary, err := iperf.SummarizeResults(iperfResults)
 				if err != nil {
@@ -197,7 +200,10 @@ func main() {
 				log.Warnf("only %d of %d qperf iterations produced results", len(qperfResults), testConfig.Iterations)
 			}
 			if len(qperfResults) == 0 {
-				thisResult.Error = "no qperf iterations produced results"
+				// iterations: 0 is a documented way to set up standing config only.
+				if testConfig.Iterations > 0 {
+					thisResult.Error = "no qperf iterations produced results"
+				}
 			} else {
 				summary, err := qperf.SummarizeResults(qperfResults)
 				if err != nil {
@@ -258,7 +264,10 @@ func main() {
 				log.Warnf("only %d of %d ttfr iterations produced results", len(ttfrResultsList), testConfig.Iterations)
 			}
 			if len(ttfrResultsList) == 0 {
-				thisResult.Error = "no ttfr iterations produced results"
+				// iterations: 0 is a documented way to set up standing config only.
+				if testConfig.Iterations > 0 {
+					thisResult.Error = "no ttfr iterations produced results"
+				}
 			} else {
 				summary, err := ttfr.SummarizeResults(ttfrResultsList)
 				if err != nil {
