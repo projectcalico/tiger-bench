@@ -67,7 +67,8 @@ type Config struct {
 
 // Clients holds the various clients used to talk to things
 type Clients struct {
-	Clientset  *kubernetes.Clientset
+	// Interface rather than *kubernetes.Clientset so tests can inject client-go's fake.
+	Clientset  kubernetes.Interface
 	CtrlClient ctrlclient.Client
 	WebClient  *http.Client
 }
