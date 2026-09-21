@@ -223,7 +223,7 @@ func SummarizeResults(results []*Results) (*ResultSummary, error) {
 		if result.External.LatencyUnit != "" || result.External.Latency != 0 || result.External.Throughput != 0 || result.External.ThroughputUnit != "" {
 			if result.External.LatencyUnit == "ms" {
 				externalLatencies = append(externalLatencies, result.External.Latency*1000)
-			} else if result.Service.LatencyUnit == "us" {
+			} else if result.External.LatencyUnit == "us" {
 				externalLatencies = append(externalLatencies, result.External.Latency)
 			} else {
 				log.Errorf("unknown external latency unit: %s", result.External.LatencyUnit)
