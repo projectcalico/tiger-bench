@@ -436,7 +436,6 @@ func SummarizeResults(results []*Results) (*ResultSummary, error) {
 	}
 	var err error
 	if len(directThroughputs) > 0 {
-		resultSummary.Throughput.Direct.Unit = "Mb/sec"
 		resultSummary.Retries.Direct, err = stats.SummarizeResults(directRetries)
 		if err != nil {
 			log.Warning("failed to summarize direct retries")
@@ -448,9 +447,10 @@ func SummarizeResults(results []*Results) (*ResultSummary, error) {
 			log.Warning("failed to summarize direct throughput")
 			return &resultSummary, err
 		}
+		// Must follow the assignment above, which replaces the whole struct.
+		resultSummary.Throughput.Direct.Unit = "Mb/sec"
 	}
 	if len(serviceThroughputs) > 0 {
-		resultSummary.Throughput.Service.Unit = "Mb/sec"
 		resultSummary.Retries.Service, err = stats.SummarizeResults(serviceRetries)
 		if err != nil {
 			log.Warning("failed to summarize service retries")
@@ -467,7 +467,6 @@ func SummarizeResults(results []*Results) (*ResultSummary, error) {
 		resultSummary.Throughput.Service.Unit = "Mb/sec"
 	}
 	if len(externalThroughputs) > 0 {
-		resultSummary.Throughput.External.Unit = "Mb/sec"
 		resultSummary.Retries.External, err = stats.SummarizeResults(externalRetries)
 		if err != nil {
 			log.Warning("failed to summarize external retries")
