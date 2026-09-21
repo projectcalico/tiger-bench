@@ -181,7 +181,10 @@ func wipeIPTables(ctx context.Context, clients config.Clients) error {
 		log.WithError(err).Error("failed to run command ", cmd)
 		return fmt.Errorf("failed to run command %s: %w", cmd, err)
 	}
-	time.Sleep(30 * time.Second)
+	// Let the dataplane reprogram before anything measures it.
+	if err := utils.SleepCtx(ctx, 30*time.Second); err != nil {
+		return err
+	}
 	log.Info("Done wiping iptables rules")
 	return nil
 }
@@ -194,7 +197,10 @@ func wipeNFTables(ctx context.Context, clients config.Clients) error {
 		log.WithError(err).Error("failed to run command ", cmd)
 		return fmt.Errorf("failed to run command %s: %w", cmd, err)
 	}
-	time.Sleep(30 * time.Second)
+	// Let the dataplane reprogram before anything measures it.
+	if err := utils.SleepCtx(ctx, 30*time.Second); err != nil {
+		return err
+	}
 	log.Info("Done wiping nftables rules")
 	return nil
 }
@@ -440,11 +446,16 @@ func waitForTigeraStatus(ctx context.Context, clients config.Clients, timeout in
 	calicoStatus := &operatorv1.TigeraStatus{}
 	childCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
-	time.Sleep(7 * time.Second) // give the operator time to update the status following whatever might have changed
+	// The operator updates status asynchronously, so an immediate read is meaningless.
+	if err := utils.SleepCtx(childCtx, 7*time.Second); err != nil {
+		return err
+	}
 
 	for childCtx.Err() == nil {
 		log.Info("Waiting for tigerastatus")
-		time.Sleep(10 * time.Second)
+		if err := utils.SleepCtx(childCtx, 10*time.Second); err != nil {
+			return err
+		}
 		err := clients.CtrlClient.Get(childCtx, ctrlclient.ObjectKey{Name: "apiserver"}, apiStatus)
 		if err != nil {
 			log.WithError(err).Error("failed to get apiserver status")

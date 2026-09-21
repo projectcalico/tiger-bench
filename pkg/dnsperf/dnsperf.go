@@ -406,7 +406,9 @@ func checkTestPods(ctx context.Context, clients config.Clients, testpods []corev
 				log.Infof("Got testPod IP: %+v", testPod.Status.PodIP)
 				break
 			}
-			time.Sleep(1 * time.Second)
+			if err := utils.SleepCtx(ctx, 1*time.Second); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -460,7 +462,7 @@ func countDuplicateSYN(ctx context.Context, pod *corev1.Pod) (int, int, error) {
 
 	for i := 0; i < 10; i++ {
 		cmd := `tcpdump -n -r dump.cap`
-		stdout, stderr, err := utils.ExecCommandInPod(ctx, pod, cmd, 10)
+		stdout, stderr, err = utils.ExecCommandInPod(ctx, pod, cmd, 10)
 
 		// Check if we got reasonable tcpdump output (contains packet data)
 		hasPacketData := strings.Contains(stdout, " IP ") && strings.Contains(stdout, "Flags [")
@@ -474,7 +476,9 @@ func countDuplicateSYN(ctx context.Context, pod *corev1.Pod) (int, int, error) {
 		} else {
 			log.WithError(err).Infof("Hit error running command %s, retrying.  stderr: %s stdout: %s", cmd, stderr, stdout)
 		}
-		time.Sleep(1 * time.Second)
+		if sleepErr := utils.SleepCtx(ctx, 1*time.Second); sleepErr != nil {
+			return 0, 0, sleepErr
+		}
 	}
 	return 0, 0, fmt.Errorf("failed to run tcpdump command in pod %+v: %+v, %s, %s", pod.Name, err, stdout, stderr)
 }
@@ -761,12 +765,7 @@ func scaleDeploymentLoop(ctx context.Context, clients config.Clients, deployment
 		if err != nil {
 			log.Warning("failed to scale deployment	up")
 		}
-		if ctx.Err() != nil {
-			log.Info("Context expired. Quitting scaleDeploymentLoop")
-			return
-		}
-		time.Sleep(sleeptime)
-		if ctx.Err() != nil {
+		if err := utils.SleepCtx(ctx, sleeptime); err != nil {
 			log.Info("Context expired. Quitting scaleDeploymentLoop")
 			return
 		}
@@ -774,10 +773,9 @@ func scaleDeploymentLoop(ctx context.Context, clients config.Clients, deployment
 		if err != nil {
 			log.Warning("failed to scale deployment	up")
 		}
-		if ctx.Err() != nil {
-			log.Info("Context expired? Quitting scaleDeploymentLoop")
+		if err := utils.SleepCtx(ctx, sleeptime); err != nil {
+			log.Info("Context expired. Quitting scaleDeploymentLoop")
 			return
 		}
-		time.Sleep(sleeptime)
 	}
 }

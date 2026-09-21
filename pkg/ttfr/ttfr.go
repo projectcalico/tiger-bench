@@ -170,7 +170,10 @@ outer:
 				delay := time.Until(nextTime)
 				if delay > 0 {
 					log.Debugf("Sleeping for %s", delay)
-					time.Sleep(delay)
+					if err := utils.SleepCtx(ctx, delay); err != nil {
+						log.Info("Context expired, stopping ttfr test loop")
+						break
+					}
 				} else {
 					log.Warning("unable to keep up with rate")
 					if numThreads-len(sem) == 0 {
@@ -224,7 +227,9 @@ func getPodTTFR(ctx context.Context, clients config.Clients, pod corev1.Pod) (fl
 		podRunning, err := utils.IsPodRunning(ctx, clients, &pod)
 		if !podRunning || err != nil {
 			log.Info("Pod ", pod.ObjectMeta.Name, " is not running, skipping")
-			time.Sleep(1 * time.Second)
+			if err := utils.SleepCtx(ctx, 1*time.Second); err != nil {
+				return 99999, err
+			}
 			continue
 		}
 		logs, err := utils.GetPodLogs(ctx, clients, pod.ObjectMeta.Name, pod.ObjectMeta.Namespace)
@@ -233,7 +238,9 @@ func getPodTTFR(ctx context.Context, clients config.Clients, pod corev1.Pod) (fl
 			if strings.Contains(err.Error(), "not found") {
 				return 99999, err
 			}
-			time.Sleep(1 * time.Second)
+			if err := utils.SleepCtx(ctx, 1*time.Second); err != nil {
+				return 99999, err
+			}
 			continue
 		}
 		//         if we got a result:
@@ -241,7 +248,9 @@ func getPodTTFR(ctx context.Context, clients config.Clients, pod corev1.Pod) (fl
 		results := r.FindStringSubmatch(logs)
 		if len(results) == 0 {
 			log.Info("No result found in logs")
-			time.Sleep(1 * time.Second)
+			if err := utils.SleepCtx(ctx, 1*time.Second); err != nil {
+				return 99999, err
+			}
 			continue
 		}
 		//           Parse the result and append to list of results
