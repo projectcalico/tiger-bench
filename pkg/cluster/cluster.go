@@ -323,6 +323,32 @@ type Details struct {
 }
 
 // GetClusterDetails gets details about the cluster
+// Bounded so that a manifest install, where the operator never populates this, does not
+// stall every run. A function because go-retry backoffs carry state.
+var installationStatusBackoff = func() retry.Backoff {
+	return retry.WithMaxRetries(6, retry.NewFibonacci(500*time.Millisecond))
+}
+
+// computedDataplane returns "" until the operator has populated the whole chain, which it
+// does asynchronously after install.
+func computedDataplane(installation *operatorv1.Installation) string {
+	computed := installation.Status.Computed
+	if computed == nil || computed.CalicoNetwork == nil || computed.CalicoNetwork.LinuxDataplane == nil {
+		return ""
+	}
+	switch *computed.CalicoNetwork.LinuxDataplane {
+	case "BPF":
+		return "bpf"
+	case "Iptables":
+		return "iptables"
+	case "VPP":
+		return "vpp"
+	case "Nftables":
+		return "nftables"
+	}
+	return "unknown"
+}
+
 func GetClusterDetails(ctx context.Context, clients config.Clients) (Details, error) {
 	log.Debug("entering getClusterDetails function")
 	details := Details{}
@@ -397,6 +423,27 @@ func GetClusterDetails(ctx context.Context, clients config.Clients) (Details, er
 		return details, fmt.Errorf("failed to get installation")
 	}
 	log.Debug("installation is", installation)
+
+	// The operator fills Status.Computed in asynchronously, so a run starting straight after
+	// install can otherwise read a half-populated Installation.
+	if err := retry.Do(ctx, installationStatusBackoff(), func(ctx context.Context) error {
+		if computedDataplane(installation) != "" {
+			return nil
+		}
+		if err := clients.CtrlClient.Get(ctx, ctrlclient.ObjectKey{Name: "default"}, installation); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return retry.RetryableError(err)
+		}
+		if computedDataplane(installation) == "" {
+			return retry.RetryableError(fmt.Errorf("installation Status.Computed is not populated yet"))
+		}
+		return nil
+	}); err != nil {
+		log.WithError(err).Warning("installation Status.Computed never populated, dataplane will be reported as unknown")
+	}
+
 	nodelist := &corev1.NodeList{}
 	if err := retry.Fibonacci(ctx, 1*time.Second, func(ctx context.Context) error {
 		if err := clients.CtrlClient.List(ctx, nodelist); err != nil {
@@ -440,19 +487,17 @@ func GetClusterDetails(ctx context.Context, clients config.Clients) (Details, er
 		details.Product = "calient"
 	}
 
-	if *installation.Status.Computed.CalicoNetwork.LinuxDataplane == "BPF" {
-		details.Dataplane = "bpf"
-	} else if *installation.Status.Computed.CalicoNetwork.LinuxDataplane == "Iptables" {
-		details.Dataplane = "iptables"
-	} else if *installation.Status.Computed.CalicoNetwork.LinuxDataplane == "VPP" {
-		details.Dataplane = "vpp"
-	} else if *installation.Status.Computed.CalicoNetwork.LinuxDataplane == "Nftables" {
-		details.Dataplane = "nftables"
-	} else {
+	details.Dataplane = computedDataplane(installation)
+	if details.Dataplane == "" {
 		details.Dataplane = "unknown"
 	}
+
 	details.IPFamily = ""
-	for _, pool := range installation.Spec.CalicoNetwork.IPPools {
+	var ipPools []operatorv1.IPPool
+	if installation.Spec.CalicoNetwork != nil {
+		ipPools = installation.Spec.CalicoNetwork.IPPools
+	}
+	for _, pool := range ipPools {
 		ipAddr, _, err := net.ParseCIDR(pool.CIDR)
 		if err != nil {
 			return details, fmt.Errorf("failed to parse CIDR")
@@ -469,7 +514,10 @@ func GetClusterDetails(ctx context.Context, clients config.Clients) (Details, er
 			details.IPFamily = "dual"
 		}
 	}
-	details.Encapsulation = installation.Spec.CalicoNetwork.IPPools[0].Encapsulation.String()
+	details.Encapsulation = "unknown"
+	if len(ipPools) > 0 {
+		details.Encapsulation = ipPools[0].Encapsulation.String()
+	}
 	// details.NFTablesMode = felixconfig.Spec.NFTablesMode
 	details.WireguardEnabled = false
 	if felixconfig.Spec.WireguardEnabled != nil {
@@ -493,7 +541,10 @@ func GetClusterDetails(ctx context.Context, clients config.Clients) (Details, er
 	details.K8SVersion = testnode.Status.NodeInfo.KubeletVersion
 	details.CRIVersion = testnode.Status.NodeInfo.ContainerRuntimeVersion
 
-	details.CNIOption = installation.Spec.CNI.Type.String()
+	details.CNIOption = "unknown"
+	if installation.Spec.CNI != nil {
+		details.CNIOption = installation.Spec.CNI.Type.String()
+	}
 
 	// This grabs the RELEASE_STREAM environment variable if it exists, overnight runs use to describe the release chosen for the cluster.
 	// By adding it to the results, we can easily filter and compare overnight runs by release stream in visualisations like Kibana.
