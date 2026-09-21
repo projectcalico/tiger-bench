@@ -142,14 +142,25 @@ func main() {
 			for j := 0; j < testConfig.Iterations; j++ {
 				iperfResult, err := iperf.RunIperfTests(ctx, clients, testConfig.Duration, testConfig.TestNamespace, *testConfig.Perf)
 				if err != nil {
+					// A failed iteration is partially filled in, so summarizing it would
+					// quietly report a zero as if it were a measurement.
 					log.WithError(err).Error("failed to get iperf results")
+					continue
 				}
 				iperfResults = append(iperfResults, iperfResult)
 			}
-			if len(iperfResults) > 0 {
-				thisResult.IPerf, err = iperf.SummarizeResults(iperfResults)
+			if len(iperfResults) < testConfig.Iterations {
+				log.Warnf("only %d of %d iperf iterations produced results", len(iperfResults), testConfig.Iterations)
+			}
+			if len(iperfResults) == 0 {
+				thisResult.Error = "no iperf iterations produced results"
+			} else {
+				summary, err := iperf.SummarizeResults(iperfResults)
 				if err != nil {
 					log.WithError(err).Error("failed to summarize iperf results")
+					thisResult.Error = fmt.Sprintf("failed to summarize iperf results: %v", err)
+				} else {
+					thisResult.IPerf = summary
 				}
 			}
 		case config.TestKindQperf:
@@ -174,15 +185,26 @@ func main() {
 				log.Debug("entering qperf loop")
 				qperfResult, err := qperf.RunQperfTests(ctx, clients, testConfig.Duration, testConfig.TestNamespace, *testConfig.Perf)
 				if err != nil {
+					// A failed iteration is partially filled in, so summarizing it would
+					// quietly report a zero as if it were a measurement.
 					log.WithError(err).Error("failed to get qperf results")
+					continue
 				}
 				qperfResults = append(qperfResults, qperfResult)
 				log.Debug("length of Results: ", len(qperfResults))
 			}
-			if len(qperfResults) > 0 {
-				thisResult.QPerf, err = qperf.SummarizeResults(qperfResults)
+			if len(qperfResults) < testConfig.Iterations {
+				log.Warnf("only %d of %d qperf iterations produced results", len(qperfResults), testConfig.Iterations)
+			}
+			if len(qperfResults) == 0 {
+				thisResult.Error = "no qperf iterations produced results"
+			} else {
+				summary, err := qperf.SummarizeResults(qperfResults)
 				if err != nil {
 					log.WithError(err).Error("failed to summarize qperf results")
+					thisResult.Error = fmt.Sprintf("failed to summarize qperf results: %v", err)
+				} else {
+					thisResult.QPerf = summary
 				}
 			}
 		case config.TestKindDNSPerf:
@@ -204,9 +226,12 @@ func main() {
 					continue
 				}
 			}
-			thisResult.DNSPerf, err = dnsperf.RunDNSPerfTests(ctx, clients, testConfig, cfg.WebServerImage, cfg.PerfImage)
+			dnsResults, err := dnsperf.RunDNSPerfTests(ctx, clients, testConfig, cfg.WebServerImage, cfg.PerfImage)
 			if err != nil {
 				log.WithError(err).Error("failed to run dnsperf tests")
+				thisResult.Error = fmt.Sprintf("failed to run dnsperf tests: %v", err)
+			} else {
+				thisResult.DNSPerf = dnsResults
 			}
 			log.Infof("dnsperf results: %v", thisResult.DNSPerf)
 		case config.TestKindTTFR:
@@ -229,10 +254,18 @@ func main() {
 				}
 				ttfrResultsList = append(ttfrResultsList, &ttfrResult)
 			}
-			if len(ttfrResultsList) > 0 {
-				thisResult.TTFR, err = ttfr.SummarizeResults(ttfrResultsList)
+			if len(ttfrResultsList) < testConfig.Iterations {
+				log.Warnf("only %d of %d ttfr iterations produced results", len(ttfrResultsList), testConfig.Iterations)
+			}
+			if len(ttfrResultsList) == 0 {
+				thisResult.Error = "no ttfr iterations produced results"
+			} else {
+				summary, err := ttfr.SummarizeResults(ttfrResultsList)
 				if err != nil {
 					log.WithError(err).Error("failed to summarize ttfr results")
+					thisResult.Error = fmt.Sprintf("failed to summarize ttfr results: %v", err)
+				} else {
+					thisResult.TTFR = summary
 				}
 			}
 		default:
