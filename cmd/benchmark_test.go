@@ -48,8 +48,7 @@ func fakeClients(t *testing.T) config.Clients {
 	installation.Status.Computed = &operatorv1.InstallationSpec{
 		CalicoNetwork: &operatorv1.CalicoNetworkSpec{LinuxDataplane: &dataplane},
 	}
-	// Spec must be populated too: GetClusterDetails walks Spec.CalicoNetwork and Spec.CNI
-	// unguarded on this branch (see #48).
+	// Spec is populated too so the fixture matches a real installed cluster.
 	installation.Spec.CalicoNetwork = &operatorv1.CalicoNetworkSpec{
 		IPPools: []operatorv1.IPPool{{CIDR: "192.168.0.0/16", Encapsulation: operatorv1.EncapsulationVXLAN}},
 	}
