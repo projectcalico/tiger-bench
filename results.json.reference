@@ -254,5 +254,77 @@
         }
       }
     ]
+  },
+  {
+    "config": {
+      "TestKind": "dnsperf",
+      "Encap": "",
+      "Dataplane": "",
+      "NumPolicies": 4,
+      "NumIdlePolicies": 0,
+      "NumServices": 6,
+      "NumPods": 4,
+      "HostNetwork": false,
+      "TestNamespace": "testns",
+      "Iterations": 1,
+      "Duration": 10,
+      "DNSPerf": {
+        "NumDomains": 0,
+        "Mode": "",
+        "RunStress": false,
+        "TestDNSPolicy": false,
+        "TargetURL": "http://www.example.com"
+      },
+      "Perf": null,
+      "TTFRConfig": null,
+      "CalicoNodeCPULimit": "",
+      "LeaveStandingConfig": true
+    },
+    "ClusterDetails": {
+      "Cloud": "unknown",
+      "Provisioner": "kubeadm",
+      "NodeType": "linux",
+      "NodeOS": "Debian GNU/Linux 12 (bookworm)",
+      "NodeKernel": "6.8.0-71-generic",
+      "NodeArch": "amd64",
+      "NumNodes": 2,
+      "Dataplane": "iptables",
+      "IPFamily": "ipv4",
+      "Encapsulation": "VXLANCrossSubnet",
+      "WireguardEnabled": false,
+      "Product": "calico",
+      "CalicoVersion": "v3.30.2",
+      "K8SVersion": "v1.32.0",
+      "CRIVersion": "containerd://1.7.24",
+      "CNIOption": "Calico",
+      "ReleaseStream": ""
+    },
+    "dnsperf": {
+      "LookupTime": {
+        "min": 0.01,
+        "max": 0.03,
+        "avg": 0.02,
+        "P50": 0.02,
+        "P75": 0.03,
+        "P90": 0.03,
+        "P99": 0.03,
+        "datapoints": 3
+      },
+      "ConnectTime": {
+        "min": 0.01,
+        "max": 0.03,
+        "avg": 0.02,
+        "P50": 0.02,
+        "P75": 0.03,
+        "P90": 0.03,
+        "P99": 0.03,
+        "datapoints": 3
+      },
+      "DuplicateSYN": 0,
+      "DuplicateSYNACK": 0,
+      "FailedCurls": 0,
+      "SuccessfulCurls": 3
+    },
+    "status": "success"
   }
 ]
