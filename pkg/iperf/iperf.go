@@ -316,86 +316,24 @@ func parseIperfOutput(stdout string) (int, float64, string, error) {
 }
 
 func makePod(nodename string, namespace string, podname string, hostnetwork bool, image string, command string, port int) corev1.Pod {
-	podname = utils.SanitizeString(podname)
-	pod := corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Labels: map[string]string{
-				"app": "iperf",
-				"pod": podname,
-			},
-			Name:      podname,
-			Namespace: namespace,
-		},
-		Spec: corev1.PodSpec{
-			AutomountServiceAccountToken: utils.BoolPtr(false),
-			SecurityContext: &corev1.PodSecurityContext{
-				RunAsNonRoot: utils.BoolPtr(true),
-				RunAsGroup:   utils.Int64Ptr(1000),
-				RunAsUser:    utils.Int64Ptr(1000),
-				SeccompProfile: &corev1.SeccompProfile{
-					Type: corev1.SeccompProfileTypeRuntimeDefault,
-				},
-			},
-			EnableServiceLinks: utils.BoolPtr(false),
-			Containers: []corev1.Container{
-				{
-					Name:    "iperf",
-					Image:   image,
-					Command: []string{"/bin/sh", "-c"},
-					Args: []string{
-						command,
-					},
-					SecurityContext: &corev1.SecurityContext{
-						Privileged:               utils.BoolPtr(false),
-						AllowPrivilegeEscalation: utils.BoolPtr(false),
-						ReadOnlyRootFilesystem:   utils.BoolPtr(false),
-						Capabilities: &corev1.Capabilities{
-							Drop: []corev1.Capability{"ALL"},
-						},
-					},
-					ImagePullPolicy: corev1.PullIfNotPresent,
-					Ports: []corev1.ContainerPort{
-						{
-							Name:          "test-port",
-							ContainerPort: int32(port),
-							Protocol:      corev1.ProtocolTCP,
-						},
-					},
-				},
-			},
-			NodeName:      nodename,
-			RestartPolicy: corev1.RestartPolicyOnFailure,
-			HostNetwork:   hostnetwork,
-		},
-	}
-	return pod
+	return utils.MakePod(utils.PodOptions{
+		Name:                   podname,
+		Namespace:              namespace,
+		NodeName:               nodename,
+		Image:                  image,
+		App:                    "iperf",
+		HostNetwork:            hostnetwork,
+		Command:                []string{"/bin/sh", "-c"},
+		Args:                   []string{command},
+		Ports:                  []corev1.ContainerPort{{Name: "test-port", ContainerPort: int32(port), Protocol: corev1.ProtocolTCP}},
+		WritableRootFilesystem: true,
+	})
 }
 
 func makeSvc(namespace string, podname string, port int) corev1.Service {
-	podname = utils.SanitizeString(podname)
-	svc := corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Labels: map[string]string{
-				"app": "iperf",
-				"pod": podname,
-			},
-			Name:      podname,
-			Namespace: namespace,
-		},
-		Spec: corev1.ServiceSpec{
-			Selector: map[string]string{
-				"app": "iperf",
-				"pod": podname,
-			},
-			Ports: []corev1.ServicePort{
-				{
-					Name: "test-port",
-					Port: int32(port),
-				},
-			},
-		},
-	}
-	return svc
+	return utils.MakeSvc(namespace, podname, "iperf", []corev1.ServicePort{
+		{Name: "test-port", Port: int32(port)},
+	})
 }
 
 // SummarizeResults converts a list of results into the statistical summary of the results
