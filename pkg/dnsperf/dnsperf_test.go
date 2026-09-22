@@ -20,6 +20,8 @@ import (
 	testing "testing"
 
 	"github.com/projectcalico/tiger-bench/pkg/stats"
+	"github.com/projectcalico/tiger-bench/pkg/utils"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	v3 "github.com/tigera/api/pkg/apis/projectcalico/v3"
 	"github.com/tigera/api/pkg/lib/numorstring"
@@ -460,4 +462,59 @@ func TestMakeDNSPolicy(t *testing.T) {
 	if err == nil {
 		t.Errorf("MakeDNSPolicy() should return an error for empty targetURL")
 	}
+}
+
+func TestExtractPortFromURL(t *testing.T) {
+	for _, tc := range []struct {
+		url  string
+		want string
+	}{
+		{"http://www.example.com", "80"},
+		{"https://www.example.com", "443"},
+		{"http://www.example.com:8080", "8080"},
+		{"https://www.example.com:8443", "8443"},
+		// The dnsperf pods curl whatever this returns, so an unknown scheme must still
+		// yield a usable port rather than an empty string.
+		{"ftp://www.example.com", "80"},
+	} {
+		got, err := extractPortFromURL(tc.url)
+		require.NoError(t, err, tc.url)
+		assert.Equal(t, tc.want, got, tc.url)
+	}
+}
+
+func TestExtractPortFromURLRejectsUnparseable(t *testing.T) {
+	_, err := extractPortFromURL("://not a url")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse URL")
+}
+
+func TestMakeDeploymentDefaultsNodeList(t *testing.T) {
+	// An empty node list must not produce an affinity term matching nothing, or the
+	// scale deployment never schedules and the DNS load never appears.
+	dep := makeDeployment("testns", "dnsscale", 3, false, nil, "img:latest", []string{"sleep", "1"})
+
+	assert.Equal(t, "dnsscale", dep.Name)
+	assert.Equal(t, "testns", dep.Namespace)
+	assert.Equal(t, int32(3), *dep.Spec.Replicas)
+	assert.False(t, dep.Spec.Template.Spec.HostNetwork)
+
+	terms := dep.Spec.Template.Spec.Affinity.NodeAffinity.
+		RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+	require.NotEmpty(t, terms)
+	assert.Equal(t, []string{"default-pool"}, terms[0].MatchExpressions[0].Values)
+}
+
+func TestMakeDeploymentUsesGivenNodes(t *testing.T) {
+	dep := makeDeployment("testns", "dnsscale", 1, true, []string{"pool-a", "pool-b"}, "img:latest", nil)
+
+	assert.True(t, dep.Spec.Template.Spec.HostNetwork)
+	terms := dep.Spec.Template.Spec.Affinity.NodeAffinity.
+		RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+	assert.Equal(t, []string{"pool-a", "pool-b"}, terms[0].MatchExpressions[0].Values)
+}
+
+func TestMakeDeploymentSanitizesName(t *testing.T) {
+	dep := makeDeployment("testns", "DNS_Scale.Dep", 1, false, nil, "img:latest", nil)
+	assert.Equal(t, utils.SanitizeString("DNS_Scale.Dep"), dep.Name)
 }

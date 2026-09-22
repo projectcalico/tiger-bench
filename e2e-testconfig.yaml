@@ -28,3 +28,19 @@
   TTFRConfig:
     TestPodsPerNode: 53
     Rate: 2.5
+
+- testKind: dnsperf
+  numPolicies: 4
+  numServices: 6
+  numPods: 4
+  duration: 10
+  hostNetwork: false
+  iterations: 1
+  LeaveStandingConfig: true
+  DNSPerf:
+    # No Mode and TestDNSPolicy off: DNS policy modes and domain-matching policies are
+    # Calico Enterprise features, so this cell exercises the dnsperf pods and curl path
+    # only. Keep it that way while this runs against OSS Calico.
+    TestDNSPolicy: false
+    RunStress: false
+    NumDomains: 0

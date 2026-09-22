@@ -67,5 +67,10 @@ docker run --rm --net=host \
   -e TTFR_IMAGE="$TTFR_IMAGE" \
   "$TOOL_IMAGE"
 
-# Validate the results file
-go run validate_results.go
+# Validate the results file. On failure, dump what was actually produced: the validator
+# only reports that the structure differs, which is impossible to act on without this.
+if ! go run validate_results.go; then
+  echo "=== generated results.json ==="
+  cat results.json
+  exit 1
+fi
