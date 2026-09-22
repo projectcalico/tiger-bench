@@ -47,7 +47,6 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 )
 
@@ -291,113 +290,34 @@ func SummarizeResults(ttfrResults []*Results) ([]*ResultSummary, error) {
 }
 
 func makePod(nodename string, namespace string, podname string, hostnetwork bool, image string) corev1.Pod {
-	podname = utils.SanitizeString(podname)
-	pod := corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Labels: map[string]string{
-				"app":  "ttfr",
-				"pod":  podname,
-				"node": nodename,
-			},
-			Name:      podname,
-			Namespace: namespace,
-		},
-		Spec: corev1.PodSpec{
-			AutomountServiceAccountToken: utils.BoolPtr(false),
-			EnableServiceLinks:           utils.BoolPtr(false),
-			SecurityContext: &corev1.PodSecurityContext{
-				RunAsNonRoot: utils.BoolPtr(true),
-				RunAsGroup:   utils.Int64Ptr(1000),
-				RunAsUser:    utils.Int64Ptr(1000),
-				SeccompProfile: &corev1.SeccompProfile{
-					Type: corev1.SeccompProfileTypeRuntimeDefault,
-				},
-			},
-			Containers: []corev1.Container{
-				{
-					Name:  "ttfr",
-					Image: image,
-					SecurityContext: &corev1.SecurityContext{
-						Privileged:               utils.BoolPtr(false),
-						AllowPrivilegeEscalation: utils.BoolPtr(false),
-						ReadOnlyRootFilesystem:   utils.BoolPtr(false),
-					},
-					Ports: []corev1.ContainerPort{
-						{
-							Name:          "http",
-							ContainerPort: 8080,
-							Protocol:      corev1.ProtocolTCP,
-						},
-					},
-				},
-			},
-			NodeName:      nodename,
-			RestartPolicy: "OnFailure",
-			HostNetwork:   hostnetwork,
-		},
-	}
-	return pod
+	return utils.MakePod(utils.PodOptions{
+		Name:                   podname,
+		Namespace:              namespace,
+		NodeName:               nodename,
+		Image:                  image,
+		App:                    "ttfr",
+		HostNetwork:            hostnetwork,
+		ExtraLabels:            map[string]string{"node": nodename},
+		Ports:                  []corev1.ContainerPort{{Name: "http", ContainerPort: 8080, Protocol: corev1.ProtocolTCP}},
+		WritableRootFilesystem: true,
+	})
 }
 
 func makeTestPod(nodename string, namespace string, podname string, hostnetwork bool, image string, target string) corev1.Pod {
-	podname = utils.SanitizeString(podname)
-	pod := corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Labels: map[string]string{
-				"app":  "ttfr",
-				"pod":  podname,
-				"node": nodename,
-			},
-			Name:      podname,
-			Namespace: namespace,
+	return utils.MakePod(utils.PodOptions{
+		Name:        podname,
+		Namespace:   namespace,
+		NodeName:    nodename,
+		Image:       image,
+		App:         "ttfr",
+		HostNetwork: hostnetwork,
+		ExtraLabels: map[string]string{"node": nodename},
+		Env: []corev1.EnvVar{
+			{Name: "ADDRESS", Value: target},
+			{Name: "PORT", Value: "8080"},
+			{Name: "PROTOCOL", Value: "http"},
 		},
-		Spec: corev1.PodSpec{
-			SecurityContext: &corev1.PodSecurityContext{
-				RunAsNonRoot: utils.BoolPtr(true),
-				RunAsGroup:   utils.Int64Ptr(1000),
-				RunAsUser:    utils.Int64Ptr(1000),
-			},
-			AutomountServiceAccountToken: utils.BoolPtr(false),
-			EnableServiceLinks:           utils.BoolPtr(false),
-			Containers: []corev1.Container{
-				{
-					Name:  "ttfr",
-					Image: image,
-					Env: []corev1.EnvVar{
-						{
-							Name:  "ADDRESS",
-							Value: target,
-						},
-						{
-							Name:  "PORT",
-							Value: "8080",
-						},
-						{
-							Name:  "PROTOCOL",
-							Value: "http",
-						},
-					},
-					SecurityContext: &corev1.SecurityContext{
-						Privileged:               utils.BoolPtr(false),
-						AllowPrivilegeEscalation: utils.BoolPtr(false),
-						ReadOnlyRootFilesystem:   utils.BoolPtr(true),
-						Capabilities: &corev1.Capabilities{
-							Drop: []corev1.Capability{"ALL"},
-						},
-					},
-					Ports: []corev1.ContainerPort{
-						{
-							Name:          "http",
-							ContainerPort: 8080,
-							Protocol:      corev1.ProtocolTCP,
-						},
-					},
-				},
-			},
-			NodeName:      nodename,
-			RestartPolicy: "Always",
-			HostNetwork:   hostnetwork,
-		},
-	}
-	return pod
+		Ports:         []corev1.ContainerPort{{Name: "http", ContainerPort: 8080, Protocol: corev1.ProtocolTCP}},
+		RestartPolicy: corev1.RestartPolicyAlways,
+	})
 }
