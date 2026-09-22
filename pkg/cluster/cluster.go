@@ -209,7 +209,10 @@ func patchFelixConfig(ctx context.Context, clients config.Clients, testConfig co
 		}
 		log.Info("TigeraStatus is ready")
 
-		time.Sleep(10 * time.Second) // wait a bit for felix to start and log the change
+		// Give felix time to start and log the change before reading its logs.
+		if err := utils.SleepCtx(ctx, 10*time.Second); err != nil {
+			return err
+		}
 
 		calicoNodeLogs, err := utils.GetCalicoNodeLogs(ctx, clients, "calico-system", "calico-node", updateTime, "Falling back to DelayDeniedPacket")
 		if err != nil {

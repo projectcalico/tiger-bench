@@ -463,18 +463,18 @@ func RetryinPod(ctx context.Context, clients config.Clients, pod *corev1.Pod, cm
 	log.Debug("Entering RetryinPod function")
 	var stdout string
 	var stderr string
-	var err error
-	for retry := 0; retry < 10; retry++ {
-		stdout, stderr, err = ExecCommandInPod(ctx, pod, cmd, timeout)
-		if err == nil {
-			break
-		} else {
-			log.Infof("Hit error running command, retrying: %s", err)
+	// Ten attempts: one, then nine retries.
+	err := retry.Do(ctx, retry.WithMaxRetries(9, retry.NewConstant(1*time.Second)), func(ctx context.Context) error {
+		var execErr error
+		stdout, stderr, execErr = ExecCommandInPod(ctx, pod, cmd, timeout)
+		if execErr != nil {
+			log.Infof("Hit error running command, retrying: %s", execErr)
 			log.Info("stdout: ", stdout)
 			log.Info("stderr: ", stderr)
+			return retry.RetryableError(execErr)
 		}
-		time.Sleep(1 * time.Second)
-	}
+		return nil
+	})
 	log.Debug("Done")
 	return stdout, stderr, err
 }
