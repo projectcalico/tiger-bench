@@ -604,66 +604,25 @@ func DeployDNSPerfPods(ctx context.Context, clients config.Clients, hostnet bool
 }
 
 func makeDNSPerfPod(nodename string, namespace string, podname string, image string, hostnetwork bool) corev1.Pod {
-	podname = utils.SanitizeString(podname)
-	runAsUser := int64(1000)
-	runAsGroup := int64(1000)
+	opts := utils.PodOptions{
+		Name:                   podname,
+		Namespace:              namespace,
+		NodeName:               nodename,
+		Image:                  image,
+		App:                    "dnsperf",
+		HostNetwork:            hostnetwork,
+		ExtraLabels:            map[string]string{"dep": "dnsperf"},
+		Command:                []string{"/bin/sh", "-c"},
+		Args:                   []string{"while true; do echo `date`: MARK; sleep 10; done"},
+		WritableRootFilesystem: true,
+		RestartPolicy:          corev1.RestartPolicyNever,
+	}
 	if hostnetwork {
-		// tcpdump needs to run as root
-		runAsUser = 0
-		runAsGroup = 0
+		// tcpdump needs root and raw sockets.
+		opts.RunAsRoot = true
+		opts.AddCapabilities = []corev1.Capability{"NET_RAW", "NET_ADMIN"}
 	}
-	pod := corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Labels: map[string]string{
-				"app": "dnsperf",
-				"pod": podname,
-				"dep": "dnsperf",
-			},
-			Name:      podname,
-			Namespace: namespace,
-		},
-		Spec: corev1.PodSpec{
-			AutomountServiceAccountToken: utils.BoolPtr(false),
-			EnableServiceLinks:           utils.BoolPtr(false),
-			SecurityContext: &corev1.PodSecurityContext{
-				RunAsNonRoot: utils.BoolPtr(!hostnetwork), // tcpdump needs to run as root
-				RunAsGroup:   utils.Int64Ptr(runAsGroup),
-				RunAsUser:    utils.Int64Ptr(runAsUser),
-				SeccompProfile: &corev1.SeccompProfile{
-					Type: corev1.SeccompProfileTypeRuntimeDefault,
-				},
-			},
-			Containers: []corev1.Container{
-				{
-					Name:    "dnsperf",
-					Image:   image,
-					Command: []string{"/bin/sh", "-c"},
-					Args: []string{
-						"while true; do echo `date`: MARK; sleep 10; done",
-					},
-					SecurityContext: &corev1.SecurityContext{
-						Privileged:               utils.BoolPtr(false),
-						AllowPrivilegeEscalation: utils.BoolPtr(false),
-						ReadOnlyRootFilesystem:   utils.BoolPtr(false),
-						Capabilities: &corev1.Capabilities{
-							Drop: []corev1.Capability{"ALL"},
-							Add: func() []corev1.Capability {
-								if hostnetwork {
-									return []corev1.Capability{"NET_RAW", "NET_ADMIN"}
-								}
-								return nil
-							}(),
-						},
-					},
-					ImagePullPolicy: corev1.PullIfNotPresent,
-				},
-			},
-			NodeName:      nodename,
-			RestartPolicy: "Never",
-			HostNetwork:   hostnetwork,
-		},
-	}
-	return pod
+	return utils.MakePod(opts)
 }
 
 func makeDeployment(namespace string, depname string, replicas int32, hostnetwork bool, nodelist []string, image string, args []string) appsv1.Deployment {

@@ -140,13 +140,17 @@ There are 2 tests requested in this example config.
 
 `iterations` specifies the number of times the measurement should be repeated. Note that a single iteration will include 2 runs of qperf - one direct pod-pod and the other pod-service-pod. If you just want to set up standing config, `iterations` can be set to zero.
 
-`Perf` defines extra settings for `thruput-latency` tests. if you do not specify Perf, it defaults the following (to preserve behaviour with existing test config files):
+`Perf` defines extra settings for `thruput-latency` and `iperf` tests. if you do not specify Perf, it defaults the following (to preserve behaviour with existing test config files):
 
 ```
 direct: true
 service: true
 external: false
+ControlPort: 32000
+TestPort: 32001
 ```
+
+The ports default per-field for non-external tests, so a `Perf` block that sets only some of these still gets usable ports. At least one of `direct`, `service` or `external` must be set, or the test would run no measurements at all.
 
 `direct` is a boolean, which determines whether the test should run a direct pod-to-pod test.
 `service` is a boolean, which determines whether the test should run a pod-to-service-to-pod test.

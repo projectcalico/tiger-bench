@@ -237,7 +237,8 @@ func TestExternalInvalidPort(t *testing.T) {
     service: false
     external: true
     ExternalIPOrFQDN: "192.168.123.1"
-    Port: 620000
+    ControlPort: 620000
+    TestPort: 32001
 `
 	filePath := "/tmp/test_configs.yaml"
 	err := os.WriteFile(filePath, []byte(fileContent), 0644)
@@ -248,7 +249,7 @@ func TestExternalInvalidPort(t *testing.T) {
 	cfg.TestConfigFile = filePath
 	err = loadTestConfigsFromFile(&cfg)
 	assert.Error(t, err)
-	assert.Equal(t, err.Error(), "ControlPort is required for an external thruput-latency test")
+	assert.Equal(t, err.Error(), "ControlPort must be between 1 and 65535")
 }
 
 func TestExternalOnly(t *testing.T) {
@@ -662,4 +663,122 @@ func TestPerfPortOutOfRangeRejectedForNonExternalTest(t *testing.T) {
 	err = loadTestConfigsFromFile(&cfg)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "TestPort must be between 1 and 65535")
+}
+
+func TestExternalTestPortOutOfRange(t *testing.T) {
+	fileContent := `
+- testKind: thruput-latency
+  perf:
+    external: true
+    ExternalIPOrFQDN: "192.168.123.1"
+    ControlPort: 32000
+    TestPort: 620000
+`
+	filePath := "/tmp/test_configs.yaml"
+	err := os.WriteFile(filePath, []byte(fileContent), 0o644)
+	require.NoError(t, err)
+	defer os.Remove(filePath)
+
+	var cfg Config
+	cfg.TestConfigFile = filePath
+	err = loadTestConfigsFromFile(&cfg)
+	require.Error(t, err)
+	assert.Equal(t, "TestPort must be between 1 and 65535", err.Error())
+}
+
+func TestNegativePortRejected(t *testing.T) {
+	fileContent := `
+- testKind: thruput-latency
+  perf:
+    direct: true
+    TestPort: -5
+`
+	filePath := "/tmp/test_configs.yaml"
+	err := os.WriteFile(filePath, []byte(fileContent), 0o644)
+	require.NoError(t, err)
+	defer os.Remove(filePath)
+
+	var cfg Config
+	cfg.TestConfigFile = filePath
+	err = loadTestConfigsFromFile(&cfg)
+	require.Error(t, err)
+	assert.Equal(t, "TestPort must be between 1 and 65535", err.Error())
+}
+
+func TestIperfControlPortOutOfRange(t *testing.T) {
+	fileContent := `
+- testKind: iperf
+  perf:
+    direct: true
+    ControlPort: 620000
+`
+	filePath := "/tmp/test_configs.yaml"
+	err := os.WriteFile(filePath, []byte(fileContent), 0o644)
+	require.NoError(t, err)
+	defer os.Remove(filePath)
+
+	var cfg Config
+	cfg.TestConfigFile = filePath
+	err = loadTestConfigsFromFile(&cfg)
+	require.Error(t, err)
+	assert.Equal(t, "ControlPort must be between 1 and 65535", err.Error())
+}
+
+func TestExternalIperfAllowsUnsetControlPort(t *testing.T) {
+	fileContent := `
+- testKind: iperf
+  perf:
+    external: true
+    ExternalIPOrFQDN: "192.168.123.1"
+    TestPort: 32001
+`
+	filePath := "/tmp/test_configs.yaml"
+	err := os.WriteFile(filePath, []byte(fileContent), 0o644)
+	require.NoError(t, err)
+	defer os.Remove(filePath)
+
+	var cfg Config
+	cfg.TestConfigFile = filePath
+	err = loadTestConfigsFromFile(&cfg)
+	require.NoError(t, err)
+	assert.Equal(t, 0, cfg.TestConfigs[0].Perf.ControlPort)
+	assert.Equal(t, 32001, cfg.TestConfigs[0].Perf.TestPort)
+}
+
+func TestNoPerfModesSelected(t *testing.T) {
+	fileContent := `
+- testKind: thruput-latency
+  perf:
+    direct: false
+    service: false
+    external: false
+`
+	filePath := "/tmp/test_configs.yaml"
+	err := os.WriteFile(filePath, []byte(fileContent), 0o644)
+	require.NoError(t, err)
+	defer os.Remove(filePath)
+
+	var cfg Config
+	cfg.TestConfigFile = filePath
+	err = loadTestConfigsFromFile(&cfg)
+	require.Error(t, err)
+	assert.Equal(t, "at least one of Direct, Service or External must be set for thruput-latency tests", err.Error())
+}
+
+func TestNoPerfModesSelectedIperf(t *testing.T) {
+	fileContent := `
+- testKind: iperf
+  perf:
+    ControlPort: 32000
+`
+	filePath := "/tmp/test_configs.yaml"
+	err := os.WriteFile(filePath, []byte(fileContent), 0o644)
+	require.NoError(t, err)
+	defer os.Remove(filePath)
+
+	var cfg Config
+	cfg.TestConfigFile = filePath
+	err = loadTestConfigsFromFile(&cfg)
+	require.Error(t, err)
+	assert.Equal(t, "at least one of Direct, Service or External must be set for iperf tests", err.Error())
 }
