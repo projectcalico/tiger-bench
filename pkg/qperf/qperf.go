@@ -172,111 +172,112 @@ func runQperfTest(ctx context.Context, clients config.Clients, srcPod *corev1.Po
 }
 
 // SummarizeResults converts a list of results into the statistical summary of the results
+// measurement is one mode's numbers from one iteration. The fields of Results are anonymous
+// structs, so they have to be copied out rather than pointed at.
+type measurement struct {
+	latency, throughput         float64
+	latencyUnit, throughputUnit string
+}
+
+// mode ties a test mode's name, its place in Results, and its place in ResultSummary.
+type mode struct {
+	name    string
+	sample  func(*Results) measurement
+	summary func(*ResultSummary) (latency, throughput *stats.ResultSummary)
+}
+
+func modes() []mode {
+	return []mode{
+		{
+			name: "direct",
+			sample: func(r *Results) measurement {
+				return measurement{r.Direct.Latency, r.Direct.Throughput, r.Direct.LatencyUnit, r.Direct.ThroughputUnit}
+			},
+			summary: func(s *ResultSummary) (*stats.ResultSummary, *stats.ResultSummary) {
+				return &s.Latency.Direct, &s.Throughput.Direct
+			},
+		},
+		{
+			name: "service",
+			sample: func(r *Results) measurement {
+				return measurement{r.Service.Latency, r.Service.Throughput, r.Service.LatencyUnit, r.Service.ThroughputUnit}
+			},
+			summary: func(s *ResultSummary) (*stats.ResultSummary, *stats.ResultSummary) {
+				return &s.Latency.Service, &s.Throughput.Service
+			},
+		},
+		{
+			name: "external",
+			sample: func(r *Results) measurement {
+				return measurement{r.External.Latency, r.External.Throughput, r.External.LatencyUnit, r.External.ThroughputUnit}
+			},
+			summary: func(s *ResultSummary) (*stats.ResultSummary, *stats.ResultSummary) {
+				return &s.Latency.External, &s.Throughput.External
+			},
+		},
+	}
+}
+
+func normaliseLatency(mode string, value float64, unit string) (float64, error) {
+	switch unit {
+	case "ms":
+		return value * 1000, nil
+	case "us":
+		return value, nil
+	}
+	return 0, fmt.Errorf("unknown %s latency unit: %s", mode, unit)
+}
+
+func normaliseThroughput(mode string, value float64, unit string) (float64, error) {
+	switch unit {
+	case "Gb/sec":
+		return value * 1000, nil
+	case "Mb/sec":
+		return value, nil
+	}
+	return 0, fmt.Errorf("unknown %s throughput unit: %s", mode, unit)
+}
+
+// SummarizeResults converts a list of results into the statistical summary of the results
 func SummarizeResults(results []*Results) (*ResultSummary, error) {
 	log.Debug("Entering summarizeResults function")
 	var resultSummary ResultSummary
-	var directLatencies []float64
-	var directThroughputs []float64
-	var serviceLatencies []float64
-	var serviceThroughputs []float64
-	var externalLatencies []float64
-	var externalThroughputs []float64
 
-	for _, result := range results {
-		if result.Direct.LatencyUnit != "" || result.Direct.Latency != 0 || result.Direct.Throughput != 0 || result.Direct.ThroughputUnit != "" {
-			if result.Direct.LatencyUnit == "ms" {
-				directLatencies = append(directLatencies, result.Direct.Latency*1000)
-			} else if result.Direct.LatencyUnit == "us" {
-				directLatencies = append(directLatencies, result.Direct.Latency)
-			} else {
-				log.Errorf("unknown direct latency unit: %s", result.Direct.LatencyUnit)
-				return &resultSummary, fmt.Errorf("unknown direct latency unit: %s", result.Direct.LatencyUnit)
+	for _, m := range modes() {
+		var latencies, throughputs []float64
+		for _, result := range results {
+			s := m.sample(result)
+			// A mode that did not run leaves every field zero.
+			if s.latencyUnit == "" && s.latency == 0 && s.throughput == 0 && s.throughputUnit == "" {
+				continue
 			}
+			latency, err := normaliseLatency(m.name, s.latency, s.latencyUnit)
+			if err != nil {
+				log.Error(err)
+				return &resultSummary, err
+			}
+			throughput, err := normaliseThroughput(m.name, s.throughput, s.throughputUnit)
+			if err != nil {
+				log.Error(err)
+				return &resultSummary, err
+			}
+			latencies = append(latencies, latency)
+			throughputs = append(throughputs, throughput)
+		}
+		if len(latencies) == 0 {
+			continue
+		}
 
-			if result.Direct.ThroughputUnit == "Gb/sec" {
-				directThroughputs = append(directThroughputs, result.Direct.Throughput*1000)
-			} else if result.Direct.ThroughputUnit == "Mb/sec" {
-				directThroughputs = append(directThroughputs, result.Direct.Throughput)
-			} else {
-				log.Errorf("unknown direct throughput unit: %s", result.Direct.ThroughputUnit)
-				return &resultSummary, fmt.Errorf("unknown direct throughput unit: %s", result.Direct.ThroughputUnit)
-			}
+		latencySummary, throughputSummary := m.summary(&resultSummary)
+		var err error
+		if *latencySummary, err = stats.SummarizeResults(latencies); err != nil {
+			return &resultSummary, fmt.Errorf("failed to summarize %s latencies", m.name)
 		}
-		if result.Service.LatencyUnit != "" || result.Service.Latency != 0 || result.Service.Throughput != 0 || result.Service.ThroughputUnit != "" {
-			if result.Service.LatencyUnit == "ms" {
-				serviceLatencies = append(serviceLatencies, result.Service.Latency*1000)
-			} else if result.Service.LatencyUnit == "us" {
-				serviceLatencies = append(serviceLatencies, result.Service.Latency)
-			} else {
-				log.Errorf("unknown service latency unit: %s", result.Service.LatencyUnit)
-				return &resultSummary, fmt.Errorf("unknown service latency unit: %s", result.Service.LatencyUnit)
-			}
-			if result.Service.ThroughputUnit == "Gb/sec" {
-				serviceThroughputs = append(serviceThroughputs, result.Service.Throughput*1000)
-			} else if result.Service.ThroughputUnit == "Mb/sec" {
-				serviceThroughputs = append(serviceThroughputs, result.Service.Throughput)
-			} else {
-				log.Errorf("unknown service throughput unit: %s", result.Service.ThroughputUnit)
-				return &resultSummary, fmt.Errorf("unknown service throughput unit: %s", result.Service.ThroughputUnit)
-			}
+		latencySummary.Unit = "us"
+		if *throughputSummary, err = stats.SummarizeResults(throughputs); err != nil {
+			return &resultSummary, fmt.Errorf("failed to summarize %s throughputs", m.name)
 		}
-		if result.External.LatencyUnit != "" || result.External.Latency != 0 || result.External.Throughput != 0 || result.External.ThroughputUnit != "" {
-			if result.External.LatencyUnit == "ms" {
-				externalLatencies = append(externalLatencies, result.External.Latency*1000)
-			} else if result.Service.LatencyUnit == "us" {
-				externalLatencies = append(externalLatencies, result.External.Latency)
-			} else {
-				log.Errorf("unknown external latency unit: %s", result.External.LatencyUnit)
-				return &resultSummary, fmt.Errorf("unknown external latency unit: %s", result.External.LatencyUnit)
-			}
-			if result.External.ThroughputUnit == "Gb/sec" {
-				externalThroughputs = append(externalThroughputs, result.External.Throughput*1000)
-			} else if result.External.ThroughputUnit == "Mb/sec" {
-				externalThroughputs = append(externalThroughputs, result.External.Throughput)
-			} else {
-				log.Errorf("unknown external throughput unit: %s", result.External.ThroughputUnit)
-				return &resultSummary, fmt.Errorf("unknown external throughput unit: %s", result.External.ThroughputUnit)
-			}
-		}
-	}
-	var err error
-	if len(directLatencies) > 0 {
-		resultSummary.Latency.Direct, err = stats.SummarizeResults(directLatencies)
-		if err != nil {
-			return &resultSummary, fmt.Errorf("failed to summarize direct latencies")
-		}
-		resultSummary.Latency.Direct.Unit = "us"
-		resultSummary.Throughput.Direct, err = stats.SummarizeResults(directThroughputs)
-		if err != nil {
-			return &resultSummary, fmt.Errorf("failed to summarize direct throughputs")
-		}
-		resultSummary.Throughput.Direct.Unit = "Mb/sec"
-	}
-
-	if len(serviceLatencies) > 0 {
-		resultSummary.Latency.Service, err = stats.SummarizeResults(serviceLatencies)
-		if err != nil {
-			return &resultSummary, fmt.Errorf("failed to summarize service latencies")
-		}
-		resultSummary.Latency.Service.Unit = "us"
-		resultSummary.Throughput.Service, err = stats.SummarizeResults(serviceThroughputs)
-		if err != nil {
-			return &resultSummary, fmt.Errorf("failed to summarize service throughputs")
-		}
-		resultSummary.Throughput.Service.Unit = "Mb/sec"
-	}
-
-	if len(externalLatencies) > 0 {
-		resultSummary.Latency.External, err = stats.SummarizeResults(externalLatencies)
-		if err != nil {
-			return &resultSummary, fmt.Errorf("failed to summarize external latencies")
-		}
-		resultSummary.Latency.External.Unit = "us"
-		resultSummary.Throughput.External, err = stats.SummarizeResults(externalThroughputs)
-		if err != nil {
-			return &resultSummary, fmt.Errorf("failed to summarize external throughputs")
-		}
-		resultSummary.Throughput.External.Unit = "Mb/sec"
+		throughputSummary.Unit = "Mb/sec"
 	}
 	return &resultSummary, nil
 }
