@@ -42,6 +42,8 @@ import (
 	"github.com/projectcalico/tiger-bench/pkg/utils"
 )
 
+const testPolicyName = "zzz-perf-test-policy"
+
 func main() {
 	// Initialize controller-runtime logger to avoid "log.SetLogger(...) was never called" warning
 	ctrllog.SetLogger(zap.New())
@@ -71,10 +73,6 @@ func main() {
 	}
 	log.SetLevel(loglevel)
 
-	const (
-		testPolicyName = "zzz-perf-test-policy"
-	)
-
 	// Validate test node prerequisites
 	if clients.CtrlClient != nil {
 		err = validateTestNodes(ctx, clients, cfg.TestConfigs)
@@ -93,180 +91,21 @@ func main() {
 		// Clean up any leftover resources from previous runs
 		cleanupNamespace(ctx, clients, testConfig)
 
-		thisResult := results.Result{}
-		thisResult.Config = *testConfig
-		thisResult.ClusterDetails, _ = cluster.GetClusterDetails(ctx, clients)
-		thisResult.Status = "failed"
-
-		err = cluster.ConfigureCluster(ctx, cfg, clients, *testConfig)
+		thisResult, err := runOneTest(ctx, cfg, clients, testConfig)
+		benchmarkResults = append(benchmarkResults, thisResult)
 		if err != nil {
-			log.WithError(err).Error("failed to configure cluster")
-			thisResult.Error = fmt.Sprintf("failed to configure cluster: %v", err)
-			benchmarkResults = append(benchmarkResults, thisResult)
-			cleanupNamespace(ctx, clients, testConfig)
+			log.WithError(err).Error("test did not complete")
 			continue
 		}
-		// update cluster details after reconfig
-		thisResult.ClusterDetails, _ = cluster.GetClusterDetails(ctx, clients)
 
-		err = cluster.SetupStandingConfig(ctx, clients, *testConfig, testConfig.TestNamespace, cfg.WebServerImage)
-		if err != nil {
-			log.WithError(err).Error("failed to setup standing config on cluster")
-			thisResult.Error = fmt.Sprintf("failed to setup standing config: %v", err)
-			benchmarkResults = append(benchmarkResults, thisResult)
-			cleanupNamespace(ctx, clients, testConfig)
-			continue
-		}
-		switch testConfig.TestKind {
-		case config.TestKindNone:
-			// No test to run
-		case config.TestKindIperf:
-			var iperfResults []*iperf.Results
-			err = policy.CreateTestPolicy(ctx, clients, testPolicyName, testConfig.TestNamespace, []int{testConfig.Perf.TestPort})
-			if err != nil {
-				log.WithError(err).Error("failed to create iperf test policy")
-				thisResult.Error = fmt.Sprintf("failed to create iperf test policy: %v", err)
-				benchmarkResults = append(benchmarkResults, thisResult)
-				cleanupNamespace(ctx, clients, testConfig)
-				continue
-			}
-			err = iperf.DeployIperfPods(ctx, clients, testConfig.TestNamespace, testConfig.HostNetwork, cfg.PerfImage, testConfig.Perf.TestPort)
-			if err != nil {
-				log.WithError(err).Error("failed to deploy iperf pods")
-				thisResult.Error = fmt.Sprintf("failed to deploy iperf pods: %v", err)
-				benchmarkResults = append(benchmarkResults, thisResult)
-				cleanupNamespace(ctx, clients, testConfig)
-				continue
-			}
-			log.Info("Running iperf tests, Iterations=", testConfig.Iterations)
-			for j := 0; j < testConfig.Iterations; j++ {
-				iperfResult, err := iperf.RunIperfTests(ctx, clients, testConfig.Duration, testConfig.TestNamespace, *testConfig.Perf)
-				if err != nil {
-					log.WithError(err).Error("failed to get iperf results")
-				}
-				iperfResults = append(iperfResults, iperfResult)
-			}
-			if len(iperfResults) > 0 {
-				thisResult.IPerf, err = iperf.SummarizeResults(iperfResults)
-				if err != nil {
-					log.WithError(err).Error("failed to summarize iperf results")
-				}
-			}
-		case config.TestKindQperf:
-			var qperfResults []*qperf.Results
-			err = policy.CreateTestPolicy(ctx, clients, testPolicyName, testConfig.TestNamespace, []int{testConfig.Perf.ControlPort, testConfig.Perf.TestPort})
-			if err != nil {
-				log.WithError(err).Error("failed to create qperf test policy")
-				thisResult.Error = fmt.Sprintf("failed to create qperf test policy: %v", err)
-				benchmarkResults = append(benchmarkResults, thisResult)
-				cleanupNamespace(ctx, clients, testConfig)
-				continue
-			}
-			err = qperf.DeployQperfPods(ctx, clients, testConfig.TestNamespace, testConfig.HostNetwork, cfg.PerfImage, testConfig.Perf.ControlPort, testConfig.Perf.TestPort)
-			if err != nil {
-				log.WithError(err).Error("failed to deploy qperf pods")
-				thisResult.Error = fmt.Sprintf("failed to deploy qperf pods: %v", err)
-				benchmarkResults = append(benchmarkResults, thisResult)
-				cleanupNamespace(ctx, clients, testConfig)
-				continue
-			}
-			for j := 0; j < testConfig.Iterations; j++ {
-				log.Debug("entering qperf loop")
-				qperfResult, err := qperf.RunQperfTests(ctx, clients, testConfig.Duration, testConfig.TestNamespace, *testConfig.Perf)
-				if err != nil {
-					log.WithError(err).Error("failed to get qperf results")
-				}
-				qperfResults = append(qperfResults, qperfResult)
-				log.Debug("length of Results: ", len(qperfResults))
-			}
-			if len(qperfResults) > 0 {
-				thisResult.QPerf, err = qperf.SummarizeResults(qperfResults)
-				if err != nil {
-					log.WithError(err).Error("failed to summarize qperf results")
-				}
-			}
-		case config.TestKindDNSPerf:
-			if testConfig.DNSPerf.TestDNSPolicy {
-				mypol, err := dnsperf.MakeDNSPolicy(testConfig.TestNamespace, testPolicyName, testConfig.DNSPerf.NumDomains, testConfig.DNSPerf.TargetURL)
-				if err != nil {
-					log.WithError(err).Error("failed to create dnsperf DNS policy object")
-					thisResult.Error = fmt.Sprintf("failed to create dnsperf DNS policy object: %v", err)
-					benchmarkResults = append(benchmarkResults, thisResult)
-					cleanupNamespace(ctx, clients, testConfig)
-					continue
-				}
-				_, err = policy.GetOrCreateDNSPolicy(ctx, clients, mypol)
-				if err != nil {
-					log.WithError(err).Error("failed to create dnsperf DNS policy")
-					thisResult.Error = fmt.Sprintf("failed to create dnsperf DNS policy: %v", err)
-					benchmarkResults = append(benchmarkResults, thisResult)
-					cleanupNamespace(ctx, clients, testConfig)
-					continue
-				}
-			}
-			thisResult.DNSPerf, err = dnsperf.RunDNSPerfTests(ctx, clients, testConfig, cfg.WebServerImage, cfg.PerfImage)
-			if err != nil {
-				log.WithError(err).Error("failed to run dnsperf tests")
-			}
-			log.Infof("dnsperf results: %v", thisResult.DNSPerf)
-		case config.TestKindTTFR:
-			var ttfrResultsList []*ttfr.Results
-			// Apply standing policy (that applies to both server and test pods)
-			err := policy.CreateTestPolicy(ctx, clients, testPolicyName, testConfig.TestNamespace, []int{8080})
-			if err != nil {
-				log.WithError(err).Error("failed to create ttfr test policy")
-				thisResult.Error = fmt.Sprintf("failed to create ttfr test policy: %v", err)
-				benchmarkResults = append(benchmarkResults, thisResult)
-				cleanupNamespace(ctx, clients, testConfig)
-				continue
-			}
-			log.Info("Running ttfr tests, Iterations=", testConfig.Iterations)
-			for j := 0; j < testConfig.Iterations; j++ {
-				ttfrResult, err := ttfr.RunTTFRTest(ctx, clients, testConfig, cfg)
-				if err != nil {
-					log.WithError(err).Error("failed to get ttfr results")
-					continue
-				}
-				ttfrResultsList = append(ttfrResultsList, &ttfrResult)
-			}
-			if len(ttfrResultsList) > 0 {
-				thisResult.TTFR, err = ttfr.SummarizeResults(ttfrResultsList)
-				if err != nil {
-					log.WithError(err).Error("failed to summarize ttfr results")
-				}
-			}
-		default:
-			log.Error("test type unknown")
-			thisResult.Error = fmt.Sprintf("unknown test type: %s", testConfig.TestKind)
-
-			benchmarkResults = append(benchmarkResults, thisResult)
-			cleanupNamespace(ctx, clients, testConfig)
-			continue
-		}
-		if thisResult.Error == "" {
-			thisResult.Status = "success"
-		}
-		// If we set the CPU limit, unset it again.
-		if testConfig.CalicoNodeCPULimit != "" {
-			err = cluster.SetCalicoNodeCPULimit(ctx, clients, "0")
-			if err != nil {
-				log.WithError(err).Error("failed to reset calico node CPU limit")
-			}
-		}
 		log.Debugf("Result: %+v", thisResult)
-		err = elasticsearch.UploadResult(cfg, thisResult, false)
-		if err != nil {
+		if err := elasticsearch.UploadResult(cfg, thisResult, false); err != nil {
 			log.WithError(err).Error("failed to upload result to elasticsearch")
 		}
-		benchmarkResults = append(benchmarkResults, thisResult)
 		log.Infof("Results: %+v", benchmarkResults)
-		err = writeResultToFile(cfg.ResultsFile, benchmarkResults)
-		if err != nil {
+		if err := writeResultToFile(cfg.ResultsFile, benchmarkResults); err != nil {
 			log.WithError(err).Error("failed to write results to file")
 		}
-
-		// Clean up after test completes
-		cleanupNamespace(ctx, clients, testConfig)
 	}
 
 	// Generate and write JUnit report after all tests complete
@@ -283,6 +122,203 @@ func main() {
 			}
 		}
 	}
+}
+
+// runOneTest configures the cluster, runs one test config and returns its result. A non-nil
+// error means the result is incomplete: the caller records it but must not publish it.
+func runOneTest(ctx context.Context, cfg config.Config, clients config.Clients, testConfig *config.TestConfig) (results.Result, error) {
+	// Teardown needs its own context: a run that failed because ctx was cancelled would
+	// otherwise leave its namespace, and any CPU limit, behind for the next test.
+	defer func() {
+		teardownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+		defer cancel()
+		if testConfig.CalicoNodeCPULimit != "" {
+			if err := cluster.SetCalicoNodeCPULimit(teardownCtx, clients, "0"); err != nil {
+				log.WithError(err).Error("failed to reset calico node CPU limit")
+			}
+		}
+		cleanupNamespace(teardownCtx, clients, testConfig)
+	}()
+
+	thisResult := results.Result{}
+	thisResult.Config = *testConfig
+	thisResult.ClusterDetails, _ = cluster.GetClusterDetails(ctx, clients)
+	thisResult.Status = "failed"
+
+	err := cluster.ConfigureCluster(ctx, cfg, clients, *testConfig)
+	if err != nil {
+		log.WithError(err).Error("failed to configure cluster")
+		thisResult.Error = fmt.Sprintf("failed to configure cluster: %v", err)
+		return thisResult, err
+	}
+	// update cluster details after reconfig
+	thisResult.ClusterDetails, _ = cluster.GetClusterDetails(ctx, clients)
+
+	err = cluster.SetupStandingConfig(ctx, clients, *testConfig, testConfig.TestNamespace, cfg.WebServerImage)
+	if err != nil {
+		log.WithError(err).Error("failed to setup standing config on cluster")
+		thisResult.Error = fmt.Sprintf("failed to setup standing config: %v", err)
+		return thisResult, err
+	}
+	switch testConfig.TestKind {
+	case config.TestKindNone:
+		// No test to run
+	case config.TestKindIperf:
+		var iperfResults []*iperf.Results
+		err = policy.CreateTestPolicy(ctx, clients, testPolicyName, testConfig.TestNamespace, []int{testConfig.Perf.TestPort})
+		if err != nil {
+			log.WithError(err).Error("failed to create iperf test policy")
+			thisResult.Error = fmt.Sprintf("failed to create iperf test policy: %v", err)
+			return thisResult, err
+		}
+		err = iperf.DeployIperfPods(ctx, clients, testConfig.TestNamespace, testConfig.HostNetwork, cfg.PerfImage, testConfig.Perf.TestPort)
+		if err != nil {
+			log.WithError(err).Error("failed to deploy iperf pods")
+			thisResult.Error = fmt.Sprintf("failed to deploy iperf pods: %v", err)
+			return thisResult, err
+		}
+		log.Info("Running iperf tests, Iterations=", testConfig.Iterations)
+		for j := 0; j < testConfig.Iterations; j++ {
+			iperfResult, err := iperf.RunIperfTests(ctx, clients, testConfig.Duration, testConfig.TestNamespace, *testConfig.Perf)
+			if err != nil {
+				// A failed iteration is partially filled in, so summarizing it would
+				// quietly report a zero as if it were a measurement.
+				log.WithError(err).Error("failed to get iperf results")
+				continue
+			}
+			iperfResults = append(iperfResults, iperfResult)
+		}
+		if len(iperfResults) < testConfig.Iterations {
+			log.Warnf("only %d of %d iperf iterations produced results", len(iperfResults), testConfig.Iterations)
+		}
+		if len(iperfResults) == 0 {
+			// iterations: 0 is a documented way to set up standing config only.
+			if testConfig.Iterations > 0 {
+				thisResult.Error = "no iperf iterations produced results"
+			}
+		} else {
+			summary, err := iperf.SummarizeResults(iperfResults)
+			if err != nil {
+				log.WithError(err).Error("failed to summarize iperf results")
+				thisResult.Error = fmt.Sprintf("failed to summarize iperf results: %v", err)
+			} else {
+				thisResult.IPerf = summary
+			}
+		}
+	case config.TestKindQperf:
+		var qperfResults []*qperf.Results
+		err = policy.CreateTestPolicy(ctx, clients, testPolicyName, testConfig.TestNamespace, []int{testConfig.Perf.ControlPort, testConfig.Perf.TestPort})
+		if err != nil {
+			log.WithError(err).Error("failed to create qperf test policy")
+			thisResult.Error = fmt.Sprintf("failed to create qperf test policy: %v", err)
+			return thisResult, err
+		}
+		err = qperf.DeployQperfPods(ctx, clients, testConfig.TestNamespace, testConfig.HostNetwork, cfg.PerfImage, testConfig.Perf.ControlPort, testConfig.Perf.TestPort)
+		if err != nil {
+			log.WithError(err).Error("failed to deploy qperf pods")
+			thisResult.Error = fmt.Sprintf("failed to deploy qperf pods: %v", err)
+			return thisResult, err
+		}
+		for j := 0; j < testConfig.Iterations; j++ {
+			log.Debug("entering qperf loop")
+			qperfResult, err := qperf.RunQperfTests(ctx, clients, testConfig.Duration, testConfig.TestNamespace, *testConfig.Perf)
+			if err != nil {
+				// A failed iteration is partially filled in, so summarizing it would
+				// quietly report a zero as if it were a measurement.
+				log.WithError(err).Error("failed to get qperf results")
+				continue
+			}
+			qperfResults = append(qperfResults, qperfResult)
+			log.Debug("length of Results: ", len(qperfResults))
+		}
+		if len(qperfResults) < testConfig.Iterations {
+			log.Warnf("only %d of %d qperf iterations produced results", len(qperfResults), testConfig.Iterations)
+		}
+		if len(qperfResults) == 0 {
+			// iterations: 0 is a documented way to set up standing config only.
+			if testConfig.Iterations > 0 {
+				thisResult.Error = "no qperf iterations produced results"
+			}
+		} else {
+			summary, err := qperf.SummarizeResults(qperfResults)
+			if err != nil {
+				log.WithError(err).Error("failed to summarize qperf results")
+				thisResult.Error = fmt.Sprintf("failed to summarize qperf results: %v", err)
+			} else {
+				thisResult.QPerf = summary
+			}
+		}
+	case config.TestKindDNSPerf:
+		if testConfig.DNSPerf.TestDNSPolicy {
+			mypol, err := dnsperf.MakeDNSPolicy(testConfig.TestNamespace, testPolicyName, testConfig.DNSPerf.NumDomains, testConfig.DNSPerf.TargetURL)
+			if err != nil {
+				log.WithError(err).Error("failed to create dnsperf DNS policy object")
+				thisResult.Error = fmt.Sprintf("failed to create dnsperf DNS policy object: %v", err)
+				return thisResult, err
+			}
+			_, err = policy.GetOrCreateDNSPolicy(ctx, clients, mypol)
+			if err != nil {
+				log.WithError(err).Error("failed to create dnsperf DNS policy")
+				thisResult.Error = fmt.Sprintf("failed to create dnsperf DNS policy: %v", err)
+				return thisResult, err
+			}
+		}
+		dnsResults, err := dnsperf.RunDNSPerfTests(ctx, clients, testConfig, cfg.WebServerImage, cfg.PerfImage)
+		if err != nil {
+			log.WithError(err).Error("failed to run dnsperf tests")
+			thisResult.Error = fmt.Sprintf("failed to run dnsperf tests: %v", err)
+		} else {
+			thisResult.DNSPerf = dnsResults
+		}
+		log.Infof("dnsperf results: %v", thisResult.DNSPerf)
+	case config.TestKindTTFR:
+		var ttfrResultsList []*ttfr.Results
+		// Apply standing policy (that applies to both server and test pods)
+		err := policy.CreateTestPolicy(ctx, clients, testPolicyName, testConfig.TestNamespace, []int{8080})
+		if err != nil {
+			log.WithError(err).Error("failed to create ttfr test policy")
+			thisResult.Error = fmt.Sprintf("failed to create ttfr test policy: %v", err)
+			return thisResult, err
+		}
+		log.Info("Running ttfr tests, Iterations=", testConfig.Iterations)
+		for j := 0; j < testConfig.Iterations; j++ {
+			ttfrResult, err := ttfr.RunTTFRTest(ctx, clients, testConfig, cfg)
+			if err != nil {
+				log.WithError(err).Error("failed to get ttfr results")
+				continue
+			}
+			ttfrResultsList = append(ttfrResultsList, &ttfrResult)
+		}
+		if len(ttfrResultsList) < testConfig.Iterations {
+			log.Warnf("only %d of %d ttfr iterations produced results", len(ttfrResultsList), testConfig.Iterations)
+		}
+		if len(ttfrResultsList) == 0 {
+			// iterations: 0 is a documented way to set up standing config only.
+			if testConfig.Iterations > 0 {
+				thisResult.Error = "no ttfr iterations produced results"
+			}
+		} else {
+			summary, err := ttfr.SummarizeResults(ttfrResultsList)
+			if err != nil {
+				log.WithError(err).Error("failed to summarize ttfr results")
+				thisResult.Error = fmt.Sprintf("failed to summarize ttfr results: %v", err)
+			} else {
+				thisResult.TTFR = summary
+			}
+		}
+	default:
+		log.Error("test type unknown")
+		thisResult.Error = fmt.Sprintf("unknown test type: %s", testConfig.TestKind)
+		return thisResult, fmt.Errorf("unknown test type: %s", testConfig.TestKind)
+	}
+	if thisResult.Error == "" {
+		thisResult.Status = "success"
+	}
+
+	if thisResult.Error == "" {
+		thisResult.Status = "success"
+	}
+	return thisResult, nil
 }
 
 func cleanupNamespace(ctx context.Context, clients config.Clients, testConfig *config.TestConfig) {

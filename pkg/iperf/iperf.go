@@ -316,172 +316,120 @@ func parseIperfOutput(stdout string) (int, float64, string, error) {
 }
 
 func makePod(nodename string, namespace string, podname string, hostnetwork bool, image string, command string, port int) corev1.Pod {
-	podname = utils.SanitizeString(podname)
-	pod := corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Labels: map[string]string{
-				"app": "iperf",
-				"pod": podname,
-			},
-			Name:      podname,
-			Namespace: namespace,
-		},
-		Spec: corev1.PodSpec{
-			AutomountServiceAccountToken: utils.BoolPtr(false),
-			SecurityContext: &corev1.PodSecurityContext{
-				RunAsNonRoot: utils.BoolPtr(true),
-				RunAsGroup:   utils.Int64Ptr(1000),
-				RunAsUser:    utils.Int64Ptr(1000),
-				SeccompProfile: &corev1.SeccompProfile{
-					Type: corev1.SeccompProfileTypeRuntimeDefault,
-				},
-			},
-			EnableServiceLinks: utils.BoolPtr(false),
-			Containers: []corev1.Container{
-				{
-					Name:    "iperf",
-					Image:   image,
-					Command: []string{"/bin/sh", "-c"},
-					Args: []string{
-						command,
-					},
-					SecurityContext: &corev1.SecurityContext{
-						Privileged:               utils.BoolPtr(false),
-						AllowPrivilegeEscalation: utils.BoolPtr(false),
-						ReadOnlyRootFilesystem:   utils.BoolPtr(false),
-						Capabilities: &corev1.Capabilities{
-							Drop: []corev1.Capability{"ALL"},
-						},
-					},
-					ImagePullPolicy: corev1.PullIfNotPresent,
-					Ports: []corev1.ContainerPort{
-						{
-							Name:          "test-port",
-							ContainerPort: int32(port),
-							Protocol:      corev1.ProtocolTCP,
-						},
-					},
-				},
-			},
-			NodeName:      nodename,
-			RestartPolicy: corev1.RestartPolicyOnFailure,
-			HostNetwork:   hostnetwork,
-		},
-	}
-	return pod
+	return utils.MakePod(utils.PodOptions{
+		Name:                   podname,
+		Namespace:              namespace,
+		NodeName:               nodename,
+		Image:                  image,
+		App:                    "iperf",
+		HostNetwork:            hostnetwork,
+		Command:                []string{"/bin/sh", "-c"},
+		Args:                   []string{command},
+		Ports:                  []corev1.ContainerPort{{Name: "test-port", ContainerPort: int32(port), Protocol: corev1.ProtocolTCP}},
+		WritableRootFilesystem: true,
+	})
 }
 
 func makeSvc(namespace string, podname string, port int) corev1.Service {
-	podname = utils.SanitizeString(podname)
-	svc := corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Labels: map[string]string{
-				"app": "iperf",
-				"pod": podname,
+	return utils.MakeSvc(namespace, podname, "iperf", []corev1.ServicePort{
+		{Name: "test-port", Port: int32(port)},
+	})
+}
+
+// SummarizeResults converts a list of results into the statistical summary of the results
+// measurement is one mode's numbers from one iteration. The fields of Results are anonymous
+// structs, so they have to be copied out rather than pointed at.
+type measurement struct {
+	retries        int
+	throughput     float64
+	throughputUnit string
+}
+
+// mode ties a test mode's name, its place in Results, and its place in ResultSummary.
+type mode struct {
+	name    string
+	sample  func(*Results) measurement
+	summary func(*ResultSummary) (retries, throughput *stats.ResultSummary)
+}
+
+func modes() []mode {
+	return []mode{
+		{
+			name: "direct",
+			sample: func(r *Results) measurement {
+				return measurement{r.Direct.Retries, r.Direct.Throughput, r.Direct.ThroughputUnit}
 			},
-			Name:      podname,
-			Namespace: namespace,
+			summary: func(s *ResultSummary) (*stats.ResultSummary, *stats.ResultSummary) {
+				return &s.Retries.Direct, &s.Throughput.Direct
+			},
 		},
-		Spec: corev1.ServiceSpec{
-			Selector: map[string]string{
-				"app": "iperf",
-				"pod": podname,
+		{
+			name: "service",
+			sample: func(r *Results) measurement {
+				return measurement{r.Service.Retries, r.Service.Throughput, r.Service.ThroughputUnit}
 			},
-			Ports: []corev1.ServicePort{
-				{
-					Name: "test-port",
-					Port: int32(port),
-				},
+			summary: func(s *ResultSummary) (*stats.ResultSummary, *stats.ResultSummary) {
+				return &s.Retries.Service, &s.Throughput.Service
+			},
+		},
+		{
+			name: "external",
+			sample: func(r *Results) measurement {
+				return measurement{r.External.Retries, r.External.Throughput, r.External.ThroughputUnit}
+			},
+			summary: func(s *ResultSummary) (*stats.ResultSummary, *stats.ResultSummary) {
+				return &s.Retries.External, &s.Throughput.External
 			},
 		},
 	}
-	return svc
+}
+
+// iperf reports throughput in Mbits/sec and nothing else; anything different means the
+// output format moved under us.
+func normaliseThroughput(mode string, value float64, unit string) (float64, error) {
+	if unit != "Mbits/sec" {
+		return 0, fmt.Errorf("unknown %s throughput unit: %s", mode, unit)
+	}
+	return value, nil
 }
 
 // SummarizeResults converts a list of results into the statistical summary of the results
 func SummarizeResults(results []*Results) (*ResultSummary, error) {
 	var resultSummary ResultSummary
-	var directRetries []float64
-	var directThroughputs []float64
-	var serviceRetries []float64
-	var serviceThroughputs []float64
-	var externalRetries []float64
-	var externalThroughputs []float64
 
-	for _, result := range results {
-		if result.Direct.Retries != 0 || result.Direct.Throughput != 0 || result.Direct.ThroughputUnit != "" {
-			directRetries = append(directRetries, float64(result.Direct.Retries))
-			if result.Direct.ThroughputUnit != "Mbits/sec" {
-				log.Errorf("unknown direct throughput unit: %s", result.Direct.ThroughputUnit)
-				return &resultSummary, fmt.Errorf("unknown direct throughput unit: %s", result.Direct.ThroughputUnit)
+	for _, m := range modes() {
+		var retries, throughputs []float64
+		for _, result := range results {
+			s := m.sample(result)
+			// A mode that did not run leaves every field zero.
+			if s.retries == 0 && s.throughput == 0 && s.throughputUnit == "" {
+				continue
 			}
-			directThroughputs = append(directThroughputs, result.Direct.Throughput)
-		}
-		if result.Service.Retries != 0 || result.Service.Throughput != 0 || result.Service.ThroughputUnit != "" {
-			serviceRetries = append(serviceRetries, float64(result.Service.Retries))
-			if result.Service.ThroughputUnit != "Mbits/sec" {
-				log.Errorf("unknown service throughput unit: %s", result.Service.ThroughputUnit)
-				return &resultSummary, fmt.Errorf("unknown service throughput unit: %s", result.Service.ThroughputUnit)
+			throughput, err := normaliseThroughput(m.name, s.throughput, s.throughputUnit)
+			if err != nil {
+				log.Error(err)
+				return &resultSummary, err
 			}
-			serviceThroughputs = append(serviceThroughputs, result.Service.Throughput)
+			retries = append(retries, float64(s.retries))
+			throughputs = append(throughputs, throughput)
 		}
-		if result.External.Retries != 0 || result.External.Throughput != 0 || result.External.ThroughputUnit != "" {
-			externalRetries = append(externalRetries, float64(result.External.Retries))
-			if result.External.ThroughputUnit != "Mbits/sec" {
-				log.Errorf("unknown external throughput unit: %s", result.External.ThroughputUnit)
-				return &resultSummary, fmt.Errorf("unknown external throughput unit: %s", result.External.ThroughputUnit)
-			}
-			externalThroughputs = append(externalThroughputs, result.External.Throughput)
-		}
-	}
-	var err error
-	if len(directThroughputs) > 0 {
-		resultSummary.Throughput.Direct.Unit = "Mb/sec"
-		resultSummary.Retries.Direct, err = stats.SummarizeResults(directRetries)
-		if err != nil {
-			log.Warning("failed to summarize direct retries")
-			return &resultSummary, err
-		}
-		resultSummary.Retries.Direct.Unit = "none"
-		resultSummary.Throughput.Direct, err = stats.SummarizeResults(directThroughputs)
-		if err != nil {
-			log.Warning("failed to summarize direct throughput")
-			return &resultSummary, err
-		}
-	}
-	if len(serviceThroughputs) > 0 {
-		resultSummary.Throughput.Service.Unit = "Mb/sec"
-		resultSummary.Retries.Service, err = stats.SummarizeResults(serviceRetries)
-		if err != nil {
-			log.Warning("failed to summarize service retries")
-			return &resultSummary, err
+		if len(throughputs) == 0 {
+			continue
 		}
 
-		resultSummary.Retries.Service.Unit = "none"
-		resultSummary.Throughput.Service, err = stats.SummarizeResults(serviceThroughputs)
-		if err != nil {
-			log.Warning("failed to summarize service throughput")
-			return &resultSummary, err
-
-		}
-		resultSummary.Throughput.Service.Unit = "Mb/sec"
-	}
-	if len(externalThroughputs) > 0 {
-		resultSummary.Throughput.External.Unit = "Mb/sec"
-		resultSummary.Retries.External, err = stats.SummarizeResults(externalRetries)
-		if err != nil {
-			log.Warning("failed to summarize external retries")
+		retriesSummary, throughputSummary := m.summary(&resultSummary)
+		var err error
+		if *retriesSummary, err = stats.SummarizeResults(retries); err != nil {
+			log.Warningf("failed to summarize %s retries", m.name)
 			return &resultSummary, err
 		}
-
-		resultSummary.Retries.External.Unit = "none"
-		resultSummary.Throughput.External, err = stats.SummarizeResults(externalThroughputs)
-		if err != nil {
-			log.Warning("failed to summarize external throughput")
+		retriesSummary.Unit = "none"
+		if *throughputSummary, err = stats.SummarizeResults(throughputs); err != nil {
+			log.Warningf("failed to summarize %s throughput", m.name)
 			return &resultSummary, err
-
 		}
-		resultSummary.Throughput.External.Unit = "Mb/sec"
+		// Must follow the assignment above, which replaces the whole struct.
+		throughputSummary.Unit = "Mb/sec"
 	}
 	return &resultSummary, nil
 }

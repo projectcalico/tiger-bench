@@ -33,6 +33,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -40,6 +41,12 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/remotecommand"
 	"k8s.io/kubernetes/pkg/client/conditions"
+)
+
+// Poll intervals, as variables so tests do not have to wait real seconds.
+var (
+	namespaceDeletePollInterval = 5 * time.Second
+	testPodPollInterval         = 10 * time.Second
 )
 
 // ExecCommandInPod executes a command in a pod
@@ -119,6 +126,9 @@ func DeleteNamespace(ctx context.Context, clients config.Clients, namespace stri
 
 	ns := &corev1.Namespace{}
 	err := clients.CtrlClient.Get(ctx, ctrlclient.ObjectKey{Name: namespace}, ns)
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
 	if err != nil {
 		log.WithError(err).Errorf("failed to get namespace %s", namespace)
 		return err
@@ -129,21 +139,27 @@ func DeleteNamespace(ctx context.Context, clients config.Clients, namespace stri
 		return err
 	}
 
-	// Block until namespace is deleted for up to 5 mins
-	endWait := time.Now().Add(5 * time.Minute)
+	// Block until the namespace actually goes away, rather than trusting the delete call.
+	endWait := time.Now().Add(60 * namespaceDeletePollInterval)
 	for {
 		log.Infof("Waiting for Namespace %s to not exist", namespace)
-		time.Sleep(5 * time.Second)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(namespaceDeletePollInterval):
+		}
 		err = clients.CtrlClient.Get(ctx, ctrlclient.ObjectKey{Name: namespace}, ns)
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
 		if err != nil {
-			break
+			// Only NotFound proves it is gone; any other error is a failed lookup.
+			log.WithError(err).Warnf("could not check whether namespace %s still exists, retrying", namespace)
 		}
 		if time.Now().After(endWait) {
-			log.Errorf("namespace %s did not delete within 5 mins", namespace)
-			return err
+			return fmt.Errorf("namespace %s still exists %s after being deleted", namespace, 60*namespaceDeletePollInterval)
 		}
 	}
-	return nil
 }
 
 // GetOrCreatePod gets or creates a pod if it does not exist
@@ -405,25 +421,41 @@ func WaitForDeployment(ctx context.Context, clients config.Clients, deployment a
 func WaitForTestPods(ctx context.Context, clients config.Clients, namespace string, label string) ([]corev1.Pod, error) {
 	log.Debug("Entering waitForPods function")
 	var testpods []corev1.Pod
-outer:
+	lastErr := fmt.Errorf("no attempt completed")
 	for retry := 0; retry < 10; retry++ {
-		time.Sleep(10 * time.Second)
+		if retry > 0 {
+			select {
+			case <-ctx.Done():
+				return testpods, ctx.Err()
+			case <-time.After(testPodPollInterval):
+			}
+		}
 		listopts := metav1.ListOptions{
 			LabelSelector: label,
 		}
 		podlist, err := clients.Clientset.CoreV1().Pods(namespace).List(ctx, listopts)
 		if err != nil {
-			continue outer
+			lastErr = err
+			continue
 		}
 		testpods = podlist.Items
+		if len(testpods) == 0 {
+			lastErr = fmt.Errorf("no pods match %q in namespace %s", label, namespace)
+			continue
+		}
+		lastErr = nil
 		for _, pod := range testpods {
-			if pod.Status.Phase != "Running" {
-				continue outer
+			if pod.Status.Phase != corev1.PodRunning {
+				lastErr = fmt.Errorf("pod %s is %s, not Running", pod.Name, pod.Status.Phase)
+				break
 			}
 		}
-		break outer
+		if lastErr == nil {
+			return testpods, nil
+		}
 	}
-	return testpods, nil
+	// Returning nil here would let callers proceed against pods that never started.
+	return testpods, fmt.Errorf("timed out waiting for pods matching %q in namespace %s: %w", label, namespace, lastErr)
 }
 
 // RetryinPod retries a command in a pod
