@@ -151,6 +151,13 @@ type PerfConfig struct {
 	ExternalIPOrFQDN string // The external IP or DNS name to connect to for an external-service-pod test
 }
 
+// Port defaults for non-external perf tests. External tests have to name their own, since the
+// ports must match whatever the service is exposed on.
+const (
+	defaultControlPort = 32000
+	defaultTestPort    = 32001
+)
+
 // DNSConfig contains the configuration specific to DNSPerf tests.
 type DNSConfig struct {
 	NumDomains    int         `validate:"gte=0"`
@@ -281,8 +288,9 @@ func defaultAndValidate(cfg *Config) error {
 		}
 		if tcfg.TestKind == "thruput-latency" || tcfg.TestKind == "iperf" {
 			if tcfg.Perf == nil {
-				tcfg.Perf = &PerfConfig{true, true, false, 32000, 32001, ""} // Default so that old configs don't break
-				continue
+				// Old configs with no Perf block keep the historical direct+service behaviour.
+				// The ports then default below, on the same path as a partial block.
+				tcfg.Perf = &PerfConfig{Direct: true, Service: true}
 			}
 			if tcfg.Perf.External {
 				if tcfg.Perf.ExternalIPOrFQDN == "" {
@@ -302,18 +310,24 @@ func defaultAndValidate(cfg *Config) error {
 				// config that sets some of Perf but leaves the ports out otherwise reaches the
 				// dataplane with port 0, and the apiserver rejects the test policy.
 				if tcfg.Perf.ControlPort == 0 {
-					tcfg.Perf.ControlPort = 32000
+					tcfg.Perf.ControlPort = defaultControlPort
 				}
 				if tcfg.Perf.TestPort == 0 {
-					tcfg.Perf.TestPort = 32001
+					tcfg.Perf.TestPort = defaultTestPort
 				}
 			}
 
-			if tcfg.TestKind == "thruput-latency" && (tcfg.Perf.ControlPort > 65535 || tcfg.Perf.ControlPort < 1) {
+			// Zero is legitimately unset for an external iperf test, which never reads ControlPort.
+			if tcfg.Perf.ControlPort != 0 && (tcfg.Perf.ControlPort > 65535 || tcfg.Perf.ControlPort < 1) {
 				return fmt.Errorf("ControlPort must be between 1 and 65535")
 			}
 			if tcfg.Perf.TestPort > 65535 || tcfg.Perf.TestPort < 1 {
 				return fmt.Errorf("TestPort must be between 1 and 65535")
+			}
+
+			if !tcfg.Perf.Direct && !tcfg.Perf.Service && !tcfg.Perf.External {
+				// Otherwise the run succeeds having measured nothing at all.
+				return fmt.Errorf("at least one of Direct, Service or External must be set for %s tests", tcfg.TestKind)
 			}
 		}
 	}
